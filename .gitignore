@@ -1,0 +1,20 @@
+# Binaries
+/bin/
+/dist/
+afauth
+afauth.exe
+
+# Go build & test artifacts
+*.test
+*.out
+vendor/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Local config
+*.local
+.env
+.env.*

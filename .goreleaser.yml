@@ -1,0 +1,52 @@
+version: 2
+
+project_name: afauth
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: afauth
+    main: ./cmd/afauth
+    binary: afauth
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: afauth
+    name_template: "afauth_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+brews:
+  - name: afauth
+    repository:
+      owner: afauth
+      name: homebrew-tap
+    homepage: "https://afauth.org"
+    description: "Agent-First Auth — reference CLI"
+    license: "MIT"
+    install: |
+      bin.install "afauth"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'

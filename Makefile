@@ -1,7 +1,7 @@
 .PHONY: build test lint fmt clean install tidy help
 
 BIN := bin/afauth
-PKG := github.com/afauth/cli
+PKG := github.com/afauthhq/cli
 
 help:
 	@echo "Available targets:"

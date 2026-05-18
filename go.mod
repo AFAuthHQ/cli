@@ -1,4 +1,4 @@
-module github.com/afauth/cli
+module github.com/afauthhq/cli
 
 go 1.22
 

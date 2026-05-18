@@ -35,7 +35,7 @@ checksum:
 brews:
   - name: afauth
     repository:
-      owner: afauth
+      owner: AFAuthHQ
       name: homebrew-tap
     homepage: "https://afauth.org"
     description: "Agent-First Auth — reference CLI"

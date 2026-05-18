@@ -1,6 +1,6 @@
 # afauth CLI
 
-> The reference command-line interface for the [AFAuth Protocol](https://github.com/afauth/spec).
+> The reference command-line interface for the [AFAuth Protocol](https://github.com/AFAuthHQ/spec).
 
 `afauth` lets agents generate a keypair, sign HTTP requests, sign up to AFAuth-enabled services, and hand off accounts to humans — from a single static binary.
 
@@ -18,7 +18,7 @@ brew install afauth/tap/afauth
 curl -fsSL https://afauth.org/install.sh | sh
 
 # From source
-go install github.com/afauth/cli/cmd/afauth@latest
+go install github.com/afauthhq/cli/cmd/afauth@latest
 ```
 
 ## Usage

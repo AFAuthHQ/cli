@@ -1,8 +1,8 @@
 # Binaries
 /bin/
 /dist/
-afauth
-afauth.exe
+/afauth
+/afauth.exe
 
 # Go build & test artifacts
 *.test

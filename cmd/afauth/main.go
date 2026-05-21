@@ -22,6 +22,7 @@ func main() {
 	root.AddCommand(
 		newInitCmd(),
 		newWhoamiCmd(),
+		newDiscoverCmd(),
 		newCallCmd(),
 		newSignupCmd(),
 		newInviteCmd(),
@@ -32,15 +33,6 @@ func main() {
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-	}
-}
-
-func newCallCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "call <url>",
-		Short: "Sign and send an HTTP request to an AFAuth-enabled service",
-		Args:  cobra.ExactArgs(1),
-		RunE:  notImpl,
 	}
 }
 

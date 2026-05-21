@@ -105,7 +105,7 @@ func Sign(req *http.Request, accountDID string, privateKey []byte, opts *SignOpt
 	covered := []proto.CoveredComponent{proto.ComponentMethod, proto.ComponentTargetURI}
 	canonReq := proto.CanonicalRequest{
 		Method:    req.Method,
-		TargetURI: req.URL.String(),
+		TargetURI: targetURI(req),
 	}
 	if hasBody {
 		covered = append(covered, proto.ComponentContentDigest)
@@ -170,7 +170,7 @@ func Verify(req *http.Request) (string, error) {
 	}
 	canonReq := proto.CanonicalRequest{
 		Method:    req.Method,
-		TargetURI: req.URL.String(),
+		TargetURI: targetURI(req),
 	}
 	for _, c := range covered {
 		if c == proto.ComponentContentDigest {
@@ -348,6 +348,30 @@ func parseSignatureHeader(hdr string) ([]byte, error) {
 		return nil, fmt.Errorf("Signature must be %d bytes, got %d", ed25519.SignatureSize, len(raw))
 	}
 	return raw, nil
+}
+
+// targetURI returns the request's full target URI per RFC 9421's
+// @target-uri component. The same Go *http.Request value is used on
+// both sides of the wire (client builds it absolutely; server receives
+// it with a path-only URL), so we have to handle both shapes:
+//
+//   - Client side: req.URL has Scheme + Host. req.URL.String() is the
+//     full URI we signed.
+//   - Server side: req.URL has only Path + RawQuery. We reconstruct
+//     <scheme>://<req.Host><path-or-target> using req.TLS for the scheme
+//     and req.Host (the Host header).
+//
+// A TLS-terminating proxy may make req.TLS misleading; deployments
+// behind one should set req.URL manually before calling Verify.
+func targetURI(req *http.Request) string {
+	if req.URL.IsAbs() {
+		return req.URL.String()
+	}
+	scheme := "http"
+	if req.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + req.Host + req.URL.RequestURI()
 }
 
 // drainAndRestoreBody reads the entire body (if any) and rewinds the

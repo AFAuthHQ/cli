@@ -1,8 +1,8 @@
 # afauth CLI
 
-> The reference command-line interface for the [AFAuth Protocol](https://github.com/AFAuthHQ/spec).
+> The reference command-line interface for the [AFAuth Protocol](https://github.com/AFAuthHQ/spec) — **Agent-First Auth**, the open protocol that makes AI agents first-class citizens of every service.
 
-`afauth` lets agents generate a keypair, sign HTTP requests, sign up to AFAuth-enabled services, and hand off accounts to humans — from a single static binary.
+Human attention is finite. Agent attention is exploding. AFAuth is how that new attention reaches services — and how your agent reaches every service. `afauth` is the reference agent runtime: a single static binary that generates an identity, signs requests, signs your agent up to any AFAuth-supporting service on its own, and hands off ownership to a human only if you want it to.
 
 ## Status
 

@@ -183,9 +183,9 @@ func parseSigParams(hdr string) (created, expires int64, nonce string) {
 		v := strings.TrimSpace(p[eq+1:])
 		switch k {
 		case "created":
-			fmt.Sscanf(v, "%d", &created)
+			_, _ = fmt.Sscanf(v, "%d", &created)
 		case "expires":
-			fmt.Sscanf(v, "%d", &expires)
+			_, _ = fmt.Sscanf(v, "%d", &expires)
 		case "nonce":
 			nonce = strings.Trim(v, `"`)
 		}

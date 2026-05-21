@@ -15,7 +15,7 @@ gate (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 # Homebrew (coming soon)
 brew install afauth/tap/afauth
 
-# Direct download (coming soon)
+# Direct download
 curl -fsSL https://afauth.org/install.sh | sh
 
 # From source

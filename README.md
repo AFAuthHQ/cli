@@ -35,9 +35,6 @@ afauth signup https://api.example.com
 # Hand off to a human
 afauth invite alice@example.com --service api.example.com
 
-# Run as an MCP server (for Claude Desktop, Cursor, etc.)
-afauth mcp
-
 # Inspect
 afauth accounts list
 afauth keys rotate

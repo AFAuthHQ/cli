@@ -27,7 +27,6 @@ func main() {
 		newInviteCmd(),
 		newAccountsCmd(),
 		newKeysCmd(),
-		newMcpCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -102,14 +101,6 @@ func newKeysCmd() *cobra.Command {
 		&cobra.Command{Use: "import <path>", Short: "Import a key", Args: cobra.ExactArgs(1), RunE: notImpl},
 	)
 	return cmd
-}
-
-func newMcpCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "mcp",
-		Short: "Run as an MCP server exposing afauth tools to MCP-aware hosts",
-		RunE:  notImpl,
-	}
 }
 
 func notImpl(cmd *cobra.Command, args []string) error {

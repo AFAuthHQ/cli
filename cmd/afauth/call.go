@@ -87,7 +87,9 @@ Use --method, --data and --header to control the request shape.
 				fmt.Fprintln(w)
 			}
 			if len(resp.Body) > 0 {
-				w.Write(resp.Body)
+				if _, err := w.Write(resp.Body); err != nil {
+					return err
+				}
 				if !bytes.HasSuffix(resp.Body, []byte("\n")) {
 					fmt.Fprintln(w)
 				}

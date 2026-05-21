@@ -36,36 +36,6 @@ func main() {
 	}
 }
 
-func newSignupCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "signup <service-url>",
-		Short: "Create an account on an AFAuth-enabled service",
-		Args:  cobra.ExactArgs(1),
-		RunE:  notImpl,
-	}
-}
-
-func newInviteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "invite <email>",
-		Short: "Invite a human to claim ownership of an account",
-		Args:  cobra.ExactArgs(1),
-		RunE:  notImpl,
-	}
-}
-
-func newAccountsCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "accounts",
-		Short: "Inspect accounts this agent has created",
-	}
-	cmd.AddCommand(
-		&cobra.Command{Use: "list", Short: "List accounts", RunE: notImpl},
-		&cobra.Command{Use: "show <id>", Short: "Show account details", Args: cobra.ExactArgs(1), RunE: notImpl},
-	)
-	return cmd
-}
-
 func newKeysCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "keys",

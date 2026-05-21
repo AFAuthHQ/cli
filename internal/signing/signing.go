@@ -8,11 +8,16 @@ import (
 )
 
 // Sign mutates req in place, adding the Signature-Input, Signature, and
-// related headers required by AFAuth (see §6.3 of the protocol spec).
+// Content-Digest (for body-carrying requests) headers required by
+// AFAuth per §5.2 of the protocol spec.
 //
-// TODO: implement RFC 9421 canonicalisation, Ed25519 signing, and the
-// AFAuth-specific signed components: @method, @target-uri, @authority,
-// content-digest, afauth-account, created, nonce.
+// Canonical signed components for v0.1 are "@method", "@target-uri",
+// and "content-digest" (when body is present). Signature parameters
+// are created, expires, nonce, keyid (the agent's did:key), and alg
+// ("ed25519"). The signer's identity is carried in keyid; there is no
+// separate afauth-account header.
+//
+// TODO: implement RFC 9421 canonicalisation and Ed25519 signing.
 func Sign(req *http.Request, accountDID string, privateKey []byte) error {
 	return ErrNotImplemented
 }

@@ -9,7 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.0.1"
+// version is overridden at link time by goreleaser via
+// `-ldflags "-X main.version=<tag>"`. The default here is the stable
+// release that ships from this branch, so a hand-built binary still
+// reports a sensible value.
+var version = "0.1.0"
 
 func main() {
 	root := &cobra.Command{

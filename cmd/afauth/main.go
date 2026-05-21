@@ -28,6 +28,7 @@ func main() {
 		newInviteCmd(),
 		newAccountsCmd(),
 		newKeysCmd(),
+		newProbeCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

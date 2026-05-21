@@ -6,7 +6,8 @@
 
 ## Status
 
-**v0.0.1 — Pre-alpha.** Not yet functional. Command scaffolding only.
+**v0.1.0-alpha.** All commands functional. Cross-language conformance
+gate (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 
 ## Install
 
@@ -28,17 +29,36 @@ go install github.com/afauthhq/cli/cmd/afauth@latest
 afauth init                              # generate keypair → ~/.afauth/key.json
 afauth whoami                            # print did:key:…
 
-# Use any AFAuth-enabled service
-afauth call https://api.example.com/things
+# Discovery and generic signed requests
+afauth discover https://api.example.com
+afauth call https://api.example.com/afauth/v1/accounts/me
+afauth call --method POST --data '{"x":1}' https://api.example.com/x
+
+# Account lifecycle
 afauth signup https://api.example.com
+afauth signup --explicit --terms-version 2026-05-01 https://api.example.com
+afauth invite alice@example.com --service https://api.example.com
+afauth invite --type oidc --issuer https://accounts.google.com --sub 12345 \
+              --service https://api.example.com
 
-# Hand off to a human
-afauth invite alice@example.com --service api.example.com
-
-# Inspect
+# Inspect local state
 afauth accounts list
-afauth keys rotate
+afauth accounts show --refresh https://api.example.com
+
+# Key management
+afauth keys rotate --service https://api.example.com
+afauth keys export --out backup.json
+afauth keys import backup.json
+
+# Conformance probe
+afauth probe https://api.example.com
+afauth probe --json https://api.example.com | jq .
 ```
+
+`~/.afauth/key.json` is the active keypair (mode 0600).
+`~/.afauth/accounts.json` is a local ledger of services this agent has
+used; the service remains authoritative. `$AFAUTH_HOME` overrides both
+locations.
 
 ## Develop
 

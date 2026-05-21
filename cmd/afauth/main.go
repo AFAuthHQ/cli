@@ -35,22 +35,6 @@ func main() {
 	}
 }
 
-func newInitCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "init",
-		Short: "Generate a new Ed25519 keypair and write it to ~/.afauth/key.json",
-		RunE:  notImpl,
-	}
-}
-
-func newWhoamiCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "whoami",
-		Short: "Print this agent's did:key identifier",
-		RunE:  notImpl,
-	}
-}
-
 func newCallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "call <url>",

@@ -36,19 +36,3 @@ func main() {
 	}
 }
 
-func newKeysCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "keys",
-		Short: "Manage agent keypairs",
-	}
-	cmd.AddCommand(
-		&cobra.Command{Use: "rotate", Short: "Rotate the active key", RunE: notImpl},
-		&cobra.Command{Use: "export", Short: "Export the active key", RunE: notImpl},
-		&cobra.Command{Use: "import <path>", Short: "Import a key", Args: cobra.ExactArgs(1), RunE: notImpl},
-	)
-	return cmd
-}
-
-func notImpl(cmd *cobra.Command, args []string) error {
-	return fmt.Errorf("%s: not yet implemented", cmd.CommandPath())
-}

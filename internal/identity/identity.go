@@ -15,9 +15,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/afauthhq/cli/internal/proto"
 )
+
+// replaceClock is overridden in tests to make backup paths deterministic.
+var replaceClock = func() int64 { return time.Now().Unix() }
 
 // Identity holds an agent's keypair and the derived did:key identifier.
 type Identity struct {
@@ -106,6 +110,63 @@ func (i *Identity) Save(path string) error {
 	defer f.Close()
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("identity: write %s: %w", path, err)
+	}
+	return nil
+}
+
+// Replace atomically swaps the keypair at path with this identity,
+// preserving the prior key as a sibling backup file with a unix-second
+// suffix (path + ".<ts>.bak"). Suitable for `afauth keys rotate`.
+//
+// Layout on success:
+//
+//	path                   = new identity
+//	path.<old-unix>.bak    = previous identity
+//
+// If path does not exist, this behaves like Save with no backup.
+func (i *Identity) Replace(path string) error {
+	if len(i.PublicKey) != proto.Ed25519PubKeyLen || len(i.Seed) != ed25519.SeedSize {
+		return errors.New("identity: cannot replace with incomplete identity")
+	}
+	did, err := i.DID()
+	if err != nil {
+		return err
+	}
+	out := onDiskFormat{
+		Version:    onDiskVersion,
+		Algorithm:  "ed25519",
+		DIDKey:     did,
+		PublicKey:  hex.EncodeToString(i.PublicKey),
+		PrivateKey: hex.EncodeToString(i.Seed),
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("identity: marshal: %w", err)
+	}
+	data = append(data, '\n')
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("identity: create dir: %w", err)
+	}
+
+	newPath := path + ".new"
+	if err := os.WriteFile(newPath, data, 0o600); err != nil {
+		return fmt.Errorf("identity: write %s: %w", newPath, err)
+	}
+
+	// Archive existing key (if any) under a unix-second suffix so the
+	// caller can recover from a rotation that the service later disputes.
+	if _, statErr := os.Stat(path); statErr == nil {
+		backup := fmt.Sprintf("%s.%d.bak", path, replaceClock())
+		if err := os.Rename(path, backup); err != nil {
+			return fmt.Errorf("identity: archive old key to %s: %w", backup, err)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("identity: stat %s: %w", path, statErr)
+	}
+
+	if err := os.Rename(newPath, path); err != nil {
+		return fmt.Errorf("identity: install new key at %s: %w", path, err)
 	}
 	return nil
 }

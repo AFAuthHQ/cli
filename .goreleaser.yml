@@ -32,6 +32,20 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+brews:
+  - name: afauth
+    repository:
+      owner: AFAuthHQ
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://afauth.org"
+    description: "Agent-First Auth — reference CLI"
+    license: "MIT"
+    install: |
+      bin.install "afauth"
+    test: |
+      assert_match "afauth version", shell_output("#{bin}/afauth --version")
+
 changelog:
   sort: asc
   filters:

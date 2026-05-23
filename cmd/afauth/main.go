@@ -35,9 +35,33 @@ func main() {
 		newProbeCmd(),
 	)
 
+	root.SetArgs(normalizeArgs(os.Args[1:]))
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// normalizeArgs translates Go-stdlib-style single-dash long flags
+// ("-help", "-version") to their POSIX equivalents ("--help",
+// "--version"). Without this, Cobra cluster-parses "-help" as
+// `-h -e -l -p` and reports a confusing "unknown shorthand flag:
+// 'e' in -elp" — users coming from CLIs built on the `flag`
+// package have no way to map that error back to their input.
+//
+// Exact match only: "-helpme" and "-help=foo" are left untouched.
+func normalizeArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		switch a {
+		case "-help":
+			out[i] = "--help"
+		case "-version":
+			out[i] = "--version"
+		default:
+			out[i] = a
+		}
+	}
+	return out
 }
 

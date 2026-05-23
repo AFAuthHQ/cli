@@ -3,8 +3,7 @@
 // and RFC 9530 content-digest (§5.2). These functions take and return
 // raw bytes and strings only — they do no I/O, hold no state, and have
 // no exposure to HTTP handler types — so the same code paths are used
-// by signing, verification, the offline test harness, and the
-// conformance probe.
+// by signing, verification, and the offline test harness.
 //
 // The Go primitives in this package are a clean-room reimplementation
 // of @afauth/core's wire layer. They MUST produce byte-identical output

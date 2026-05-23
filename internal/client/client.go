@@ -1,5 +1,5 @@
 // Package client implements the AFAuth-signed HTTP client used by the
-// CLI's call/signup/invite/keys/probe commands. It owns the agent's
+// CLI's call/signup/invite/keys commands. It owns the agent's
 // identity, an http.Client, and the §11 error-envelope parser.
 //
 // Higher-level command-specific behaviour (typed-recipient invitations,

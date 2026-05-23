@@ -51,10 +51,6 @@ afauth accounts show --refresh https://api.example.com
 afauth keys rotate --service https://api.example.com
 afauth keys export --out backup.json
 afauth keys import backup.json
-
-# Conformance probe
-afauth probe https://api.example.com
-afauth probe --json https://api.example.com | jq .
 ```
 
 `~/.afauth/key.json` is the active keypair (mode 0600).

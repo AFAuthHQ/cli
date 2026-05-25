@@ -16,13 +16,24 @@ import (
 var version = "0.2.0"
 
 func main() {
+	root := newRootCmd()
+	root.SetArgs(normalizeArgs(os.Args[1:]))
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// newRootCmd builds the afauth cobra root and wires every subcommand.
+// Extracted from main so tests can drive the whole command tree
+// without spawning a subprocess.
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "afauth",
 		Short:   "AFAuth — Agent-First Auth CLI",
 		Long:    `afauth is the reference command-line interface for the AFAuth Protocol.`,
 		Version: version,
 	}
-
 	root.AddCommand(
 		newInitCmd(),
 		newWhoamiCmd(),
@@ -33,12 +44,7 @@ func main() {
 		newAccountsCmd(),
 		newKeysCmd(),
 	)
-
-	root.SetArgs(normalizeArgs(os.Args[1:]))
-	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return root
 }
 
 // normalizeArgs translates Go-stdlib-style single-dash long flags

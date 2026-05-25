@@ -17,6 +17,19 @@ jobs:
       - run: go mod download
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Coverage threshold
+        # Cross-package coverage from the cmd/afauth integration tests
+        # is the most meaningful number — it counts hits made by the
+        # CLI harness against internal/* packages. Floor is set below
+        # the current value so the gate prevents regression while
+        # leaving room for refactor noise. Raise as coverage improves.
+        env:
+          COVERAGE_FLOOR: "75"
+        run: |
+          go test -coverpkg=./... -coverprofile=cov.out ./... > /dev/null
+          total=$(go tool cover -func=cov.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
+          echo "total coverage: ${total}% (floor: ${COVERAGE_FLOOR}%)"
+          awk -v t="${total}" -v f="${COVERAGE_FLOOR}" 'BEGIN { if (t+0 < f+0) { printf "coverage %s%% below floor %s%%\n", t, f; exit 1 } }'
 
   lint:
     runs-on: ubuntu-latest

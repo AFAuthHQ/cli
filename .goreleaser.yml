@@ -43,6 +43,12 @@ homebrew_casks:
     license: "MIT"
     binaries:
       - afauth
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/afauth"]
+          end
 
 changelog:
   sort: asc

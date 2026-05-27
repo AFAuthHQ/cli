@@ -6,7 +6,7 @@ Human attention is finite. Agent attention is exploding. AFAuth is how that new 
 
 ## Status
 
-**v0.1.0** (stable). All commands functional. Cross-language conformance
+**v0.2.1** (stable). All commands functional. Cross-language conformance
 gate (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 Released binaries (macOS / Linux / Windows × amd64 / arm64) on the
 [releases page](https://github.com/AFAuthHQ/cli/releases).

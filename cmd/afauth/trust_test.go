@@ -19,13 +19,12 @@ import (
 // three endpoints `afauth trust` uses and lets each test seed the
 // confirmation state to drive the polling loop.
 type stubTrust struct {
-	mu          sync.Mutex
-	server      *httptest.Server
-	pollCount   atomic.Int32
+	server       *httptest.Server
+	pollCount    atomic.Int32
 	confirmAfter int32 // pendings before confirming; 0 = confirm immediately
-	binding     trustBindingResp
-	tokenResp   trustTokenResp
-	wantBearer  string
+	binding      trustBindingResp
+	tokenResp    trustTokenResp
+	wantBearer   string
 }
 
 func newStubTrust(t *testing.T, confirmAfter int32, binding trustBindingResp, tokenResp trustTokenResp, wantBearer string) *stubTrust {

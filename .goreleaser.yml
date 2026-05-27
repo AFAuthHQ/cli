@@ -27,12 +27,12 @@ archives:
     name_template: "afauth_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ["zip"]
 
 checksum:
   name_template: "checksums.txt"
 
-brews:
+homebrew_casks:
   - name: afauth
     repository:
       owner: AFAuthHQ
@@ -41,10 +41,7 @@ brews:
     homepage: "https://afauth.org"
     description: "Agent-First Auth — reference CLI"
     license: "MIT"
-    install: |
-      bin.install "afauth"
-    test: |
-      assert_match "afauth version", shell_output("#{bin}/afauth --version")
+    binary: afauth
 
 changelog:
   sort: asc

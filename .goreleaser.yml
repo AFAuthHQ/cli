@@ -41,7 +41,8 @@ homebrew_casks:
     homepage: "https://afauth.org"
     description: "Agent-First Auth — reference CLI"
     license: "MIT"
-    binary: afauth
+    binaries:
+      - afauth
 
 changelog:
   sort: asc

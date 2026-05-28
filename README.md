@@ -6,8 +6,9 @@ Human attention is finite. Agent attention is exploding. AFAuth is how that new 
 
 ## Status
 
-**v0.2.1** (stable). All commands functional. Cross-language conformance
-gate (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
+**v0.3.0** (stable). All commands functional, now including the
+AFAP-0006 `afauth trust` subcommand. Cross-language conformance gate
+(`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 Released binaries (macOS / Linux / Windows × amd64 / arm64) on the
 [releases page](https://github.com/AFAuthHQ/cli/releases).
 
@@ -51,12 +52,21 @@ afauth accounts show --refresh https://api.example.com
 afauth keys rotate --service https://api.example.com
 afauth keys export --out backup.json
 afauth keys import backup.json
+
+# Trust attestor (AFAP-0006) — bind to a human account, mint §10 JWTs
+afauth trust link                                # browse to trust.afauth.org, confirm
+afauth trust token did:web:tavily.com            # mint an audience-bound JWT
+afauth signup --attest "$(afauth trust token did:web:tavily.com)" \
+              https://tavily.com                 # use it against an attested_only service
+afauth trust status                              # show the cached binding
+afauth trust forget                              # delete the local binding
 ```
 
 `~/.afauth/key.json` is the active keypair (mode 0600).
 `~/.afauth/accounts.json` is a local ledger of services this agent has
-used; the service remains authoritative. `$AFAUTH_HOME` overrides both
-locations.
+used; the service remains authoritative. `~/.afauth/trust.json` (mode
+0600) holds the trust-attestor binding token if you ran
+`afauth trust link`. `$AFAUTH_HOME` overrides all three locations.
 
 ## Develop
 

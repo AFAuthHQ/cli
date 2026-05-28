@@ -13,7 +13,7 @@ import (
 // `-ldflags "-X main.version=<tag>"`. The default here is the stable
 // release that ships from this branch, so a hand-built binary still
 // reports a sensible value.
-var version = "0.2.0"
+var version = "0.3.0"
 
 func main() {
 	root := newRootCmd()

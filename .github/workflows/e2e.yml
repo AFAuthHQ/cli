@@ -1,0 +1,128 @@
+name: E2E interop
+
+# Runs the spec/harness/e2e suite against the CLI binary built from
+# this PR. Catches wire-protocol drift between the CLI and a real
+# @afauthhq/server (in the reference-server fixture), and exercises
+# the full trust-link flow against a real trust attestor.
+#
+# One-time setup:
+#
+#   Create a fine-grained personal access token with `Contents: Read`
+#   on AFAuthHQ/trust and AFAuthHQ/registry. Store it as a repo secret
+#   named `AFAUTH_INTEROP_PAT` under Settings → Secrets and variables
+#   → Actions. The harness needs to clone those private repos to build
+#   the dependency-side stack from source. Once trust + registry
+#   publish GHCR images from their own CI, this workflow can switch
+#   to pulling images and the PAT becomes unnecessary.
+#
+# Until the secret is set, the job runs as a no-op (green check, with
+# a workflow notice explaining how to enable it). This avoids a
+# perpetually-red CI status before the one-time setup is done.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Configuration check
+        id: cfg
+        env:
+          PAT: ${{ secrets.AFAUTH_INTEROP_PAT }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::notice::AFAUTH_INTEROP_PAT not configured — e2e suite skipped. See .github/workflows/e2e.yml header for setup."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out cli (this repo)
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          path: cli
+
+      - name: Check out spec
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: AFAuthHQ/spec
+          ref: main
+          path: spec
+
+      - name: Check out trust (private)
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: AFAuthHQ/trust
+          ref: main
+          path: trust
+          token: ${{ secrets.AFAUTH_INTEROP_PAT }}
+
+      - name: Check out registry (private)
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: AFAuthHQ/registry
+          ref: main
+          path: registry
+          token: ${{ secrets.AFAUTH_INTEROP_PAT }}
+
+      - name: Set up Go
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Set up Node
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build CLI under test
+        if: steps.cfg.outputs.skip != 'true'
+        working-directory: cli
+        run: |
+          make build
+          echo "AFAUTH_CLI_BIN=$PWD/bin/afauth" >> "$GITHUB_ENV"
+
+      - name: Bring up the e2e stack
+        if: steps.cfg.outputs.skip != 'true'
+        working-directory: spec/harness/e2e
+        env:
+          E2E_TRUST_DIR: ${{ github.workspace }}/trust
+          E2E_REGISTRY_DIR: ${{ github.workspace }}/registry
+          E2E_WAIT_SECONDS: '180'
+        run: ./scripts/up.sh
+
+      - name: Run all scenarios
+        if: steps.cfg.outputs.skip != 'true'
+        working-directory: spec/harness/e2e
+        run: node run.js
+
+      - name: Dump stack logs on failure
+        if: failure() && steps.cfg.outputs.skip != 'true'
+        working-directory: spec/harness/e2e
+        run: |
+          echo "::group::reference-server"
+          docker compose logs reference-server --tail=200 || true
+          echo "::endgroup::"
+          echo "::group::trust"
+          docker compose logs trust --tail=200 || true
+          echo "::endgroup::"
+          echo "::group::registry"
+          docker compose logs registry --tail=200 || true
+          echo "::endgroup::"
+
+      - name: Tear down
+        if: always() && steps.cfg.outputs.skip != 'true'
+        working-directory: spec/harness/e2e
+        run: ./scripts/down.sh

@@ -1,0 +1,52 @@
+name: Probe HOMEBREW_TAP_GITHUB_TOKEN scope
+
+# One-shot diagnostic. Tries to check out AFAuthHQ/trust and
+# AFAuthHQ/registry (both private) using HOMEBREW_TAP_GITHUB_TOKEN to
+# determine whether that token already has Contents:Read scope on
+# those repos. Used to decide whether the E2E interop workflow needs
+# a new dedicated PAT (AFAUTH_INTEROP_PAT) or can reuse this one.
+#
+# Manually triggered only. Delete this file once the question is
+# answered.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe trust checkout
+        id: trust
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: AFAuthHQ/trust
+          ref: main
+          path: trust
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Probe registry checkout
+        id: registry
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: AFAuthHQ/registry
+          ref: main
+          path: registry
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Verdict
+        run: |
+          trust_ok=${{ steps.trust.outcome == 'success' }}
+          registry_ok=${{ steps.registry.outcome == 'success' }}
+          echo "trust    checkout: ${{ steps.trust.outcome }}"
+          echo "registry checkout: ${{ steps.registry.outcome }}"
+          if [ "$trust_ok" = "true" ] && [ "$registry_ok" = "true" ]; then
+            echo "::notice::HOMEBREW_TAP_GITHUB_TOKEN has Contents:Read on both — e2e.yml can reuse it."
+            exit 0
+          else
+            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN does NOT cover both — a dedicated PAT is still needed."
+            exit 1
+          fi

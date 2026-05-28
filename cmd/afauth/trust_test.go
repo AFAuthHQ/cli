@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,6 +91,7 @@ func TestTrustLink_FullFlow(t *testing.T) {
 		"--base", stub.server.URL,
 		"--label", "test-agent",
 		"--no-loopback", // exercise the polling path
+		"--no-browser",  // don't actually launch a browser during tests
 		"--poll", "0",   // immediate retry — test uses tiny sleeps
 		"--timeout", "5",
 	)
@@ -139,7 +141,7 @@ func TestTrustToken_UsesPersistedBinding(t *testing.T) {
 	)
 
 	if _, _, err := runCLI(t, "trust", "link",
-		"--base", stub.server.URL, "--no-loopback", "--poll", "0", "--timeout", "5",
+		"--base", stub.server.URL, "--no-loopback", "--no-browser", "--poll", "0", "--timeout", "5",
 	); err != nil {
 		t.Fatalf("link: %v", err)
 	}
@@ -241,7 +243,7 @@ func TestTrustPoll_SignaturesValid(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	if _, _, err := runCLI(t, "trust", "link", "--base", srv.URL, "--no-loopback", "--poll", "0", "--timeout", "5"); err != nil {
+	if _, _, err := runCLI(t, "trust", "link", "--base", srv.URL, "--no-loopback", "--no-browser", "--poll", "0", "--timeout", "5"); err != nil {
 		t.Fatalf("link: %v", err)
 	}
 
@@ -322,7 +324,7 @@ func TestTrustLink_LoopbackCallback(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	stdout, _, err := runCLI(t, "trust", "link",
-		"--base", srv.URL, "--timeout", "5",
+		"--base", srv.URL, "--no-browser", "--timeout", "5",
 	)
 	if err != nil {
 		t.Fatalf("trust link: %v", err)
@@ -381,6 +383,7 @@ func TestTrustLink_NoLoopback_PollsAsFallback(t *testing.T) {
 	_, _, err := runCLI(t, "trust", "link",
 		"--base", stub.server.URL,
 		"--no-loopback",
+		"--no-browser",
 		"--poll", "0", "--timeout", "5",
 	)
 	if err != nil {
@@ -391,6 +394,90 @@ func TestTrustLink_NoLoopback_PollsAsFallback(t *testing.T) {
 	}
 	// Silence the unused capturedCallback warning.
 	_ = capturedCallback
+}
+
+func TestHeadlessReason(t *testing.T) {
+	// Wipe every var the function inspects so each subtest starts clean.
+	for _, k := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "DISPLAY", "WAYLAND_DISPLAY"} {
+		t.Setenv(k, "")
+	}
+
+	t.Run("local desktop is not headless", func(t *testing.T) {
+		// On Linux the default is "no DISPLAY" → headless; only assert
+		// the cross-platform contract: zero env vars and no SSH means
+		// non-Linux is non-headless.
+		if runtime.GOOS == "linux" {
+			t.Skip("Linux without DISPLAY is headless by design")
+		}
+		t.Setenv("SSH_CONNECTION", "")
+		if r := headlessReason(); r != "" {
+			t.Fatalf("expected non-headless on %s with no SSH vars, got %q", runtime.GOOS, r)
+		}
+	})
+
+	t.Run("SSH_CONNECTION marks headless", func(t *testing.T) {
+		t.Setenv("SSH_CONNECTION", "10.0.0.1 2222 10.0.0.2 22")
+		if r := headlessReason(); r == "" {
+			t.Fatal("expected headless when SSH_CONNECTION is set")
+		}
+	})
+
+	t.Run("SSH_CLIENT marks headless", func(t *testing.T) {
+		t.Setenv("SSH_CONNECTION", "")
+		t.Setenv("SSH_CLIENT", "10.0.0.1 2222 22")
+		if r := headlessReason(); r == "" {
+			t.Fatal("expected headless when SSH_CLIENT is set")
+		}
+	})
+
+	t.Run("Linux without DISPLAY is headless", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("DISPLAY check is Linux-only")
+		}
+		if r := headlessReason(); r == "" {
+			t.Fatal("expected headless on Linux with no DISPLAY")
+		}
+	})
+
+	t.Run("Linux with DISPLAY is not headless", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("DISPLAY check is Linux-only")
+		}
+		t.Setenv("DISPLAY", ":0")
+		if r := headlessReason(); r != "" {
+			t.Fatalf("expected non-headless with DISPLAY set, got %q", r)
+		}
+	})
+}
+
+func TestTrustLink_NoBrowserFlagSuppressesOpenAttempt(t *testing.T) {
+	// On a dev macOS box the test would otherwise launch a real browser
+	// at httptest's link_url. --no-browser must short-circuit that and
+	// emit neither the success nor the failure line.
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	binding := trustBindingResp{
+		BindingID: "b", BindingToken: "t",
+		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}
+	stub := newStubTrust(t, 0, binding, trustTokenResp{}, "")
+
+	stdout, stderr, err := runCLI(t, "trust", "link",
+		"--base", stub.server.URL,
+		"--no-loopback", "--no-browser",
+		"--poll", "0", "--timeout", "5",
+	)
+	if err != nil {
+		t.Fatalf("trust link: %v", err)
+	}
+	if strings.Contains(stdout, "opened in your browser") {
+		t.Fatalf("--no-browser should suppress the open-success line; stdout: %s", stdout)
+	}
+	if strings.Contains(stderr, "could not auto-open browser") {
+		t.Fatalf("--no-browser should suppress the open-failure line; stderr: %s", stderr)
+	}
 }
 
 func mustHex(t *testing.T, s string) []byte {

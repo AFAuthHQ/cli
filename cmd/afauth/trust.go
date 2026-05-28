@@ -12,7 +12,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -61,6 +63,7 @@ func newTrustLinkCmd() *cobra.Command {
 		pollSec    int
 		timeoutSec int
 		noLoopback bool
+		noBrowser  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "link",
@@ -115,6 +118,13 @@ cannot bind a local port).
 			fmt.Fprintln(cmd.OutOrStdout(), "")
 			fmt.Fprintln(cmd.OutOrStdout(), "  "+start.LinkURL)
 			fmt.Fprintln(cmd.OutOrStdout(), "")
+			if !noBrowser {
+				if err := openBrowser(start.LinkURL); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "(could not auto-open browser: %v — copy the URL above)\n", err)
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "(opened in your browser)")
+				}
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Waiting (expires in %ds)…\n", start.ExpiresIn)
 
 			binding, err := trustWaitForConfirmation(
@@ -148,7 +158,51 @@ cannot bind a local port).
 	cmd.Flags().IntVar(&pollSec, "poll", 3, "seconds between poll attempts (loopback fallback)")
 	cmd.Flags().IntVar(&timeoutSec, "timeout", 600, "give up after N seconds")
 	cmd.Flags().BoolVar(&noLoopback, "no-loopback", false, "disable the loopback callback shortcut")
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-open the link in a browser (just print it)")
 	return cmd
+}
+
+// ---------------------------------------------------------------------
+// Browser auto-open
+// ---------------------------------------------------------------------
+
+// openBrowser launches the OS's default browser at url. Best-effort:
+// returns a descriptive error when no display is available or the
+// underlying command fails. Callers print the URL anyway so the human
+// can fall back to copy/paste — e.g. when SSH'd into a remote box
+// without an X server.
+func openBrowser(url string) error {
+	if reason := headlessReason(); reason != "" {
+		return fmt.Errorf("no display (%s)", reason)
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default: // linux, freebsd, openbsd
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
+}
+
+// headlessReason returns a short string when the current process has
+// no realistic way to open a browser locally: a remote SSH session,
+// or Linux with no X / Wayland display. Empty string means "go ahead
+// and try."
+func headlessReason() string {
+	if os.Getenv("SSH_CONNECTION") != "" ||
+		os.Getenv("SSH_CLIENT") != "" ||
+		os.Getenv("SSH_TTY") != "" {
+		return "remote SSH session"
+	}
+	if runtime.GOOS == "linux" &&
+		os.Getenv("DISPLAY") == "" &&
+		os.Getenv("WAYLAND_DISPLAY") == "" {
+		return "no DISPLAY/WAYLAND_DISPLAY"
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------

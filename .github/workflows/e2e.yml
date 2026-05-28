@@ -5,19 +5,15 @@ name: E2E interop
 # @afauthhq/server (in the reference-server fixture), and exercises
 # the full trust-link flow against a real trust attestor.
 #
-# One-time setup:
+# Token: reuses HOMEBREW_TAP_GITHUB_TOKEN (already set on this repo
+# for the Release workflow) to clone the private trust + registry
+# repos. Probed and confirmed to have Contents:Read on both. Once
+# those repos publish GHCR images from their own CI, this workflow
+# can switch to pulling images and the token becomes unnecessary.
 #
-#   Create a fine-grained personal access token with `Contents: Read`
-#   on AFAuthHQ/trust and AFAuthHQ/registry. Store it as a repo secret
-#   named `AFAUTH_INTEROP_PAT` under Settings → Secrets and variables
-#   → Actions. The harness needs to clone those private repos to build
-#   the dependency-side stack from source. Once trust + registry
-#   publish GHCR images from their own CI, this workflow can switch
-#   to pulling images and the PAT becomes unnecessary.
-#
-# Until the secret is set, the job runs as a no-op (green check, with
-# a workflow notice explaining how to enable it). This avoids a
-# perpetually-red CI status before the one-time setup is done.
+# If the secret is somehow missing or revoked, the job no-ops with a
+# workflow notice instead of failing red — avoids polluting CI status
+# while it's being re-rotated.
 
 on:
   push:
@@ -34,10 +30,10 @@ jobs:
       - name: Configuration check
         id: cfg
         env:
-          PAT: ${{ secrets.AFAUTH_INTEROP_PAT }}
+          PAT: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           if [ -z "$PAT" ]; then
-            echo "::notice::AFAUTH_INTEROP_PAT not configured — e2e suite skipped. See .github/workflows/e2e.yml header for setup."
+            echo "::notice::HOMEBREW_TAP_GITHUB_TOKEN not available — e2e suite skipped. See .github/workflows/e2e.yml header."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -64,7 +60,7 @@ jobs:
           repository: AFAuthHQ/trust
           ref: main
           path: trust
-          token: ${{ secrets.AFAUTH_INTEROP_PAT }}
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Check out registry (private)
         if: steps.cfg.outputs.skip != 'true'
@@ -73,7 +69,7 @@ jobs:
           repository: AFAuthHQ/registry
           ref: main
           path: registry
-          token: ${{ secrets.AFAUTH_INTEROP_PAT }}
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Set up Go
         if: steps.cfg.outputs.skip != 'true'

@@ -396,6 +396,68 @@ func TestTrustLink_NoLoopback_PollsAsFallback(t *testing.T) {
 	_ = capturedCallback
 }
 
+func TestTrustLink_PhasePromptOnAwaitingConfirm(t *testing.T) {
+	// First two polls report `awaiting_signin` (browser not loaded yet);
+	// subsequent polls flip to `awaiting_confirm` (browser loaded the
+	// page); finally `confirmed` lands the binding. The CLI should
+	// emit the "click Confirm" line exactly once, at the transition.
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	var pollN atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/link/start", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, trustLinkStartResp{
+			ReqID: "req-phase", LinkURL: "http://example/link",
+			PollURL: "http://example/poll", ExpiresIn: 60,
+		})
+	})
+	mux.HandleFunc("/v1/link/poll", func(w http.ResponseWriter, r *http.Request) {
+		n := pollN.Add(1)
+		switch {
+		case n <= 2:
+			writeJSON(w, 200, map[string]string{
+				"state": "pending", "phase": "awaiting_signin",
+			})
+		case n <= 4:
+			writeJSON(w, 200, map[string]string{
+				"state": "pending", "phase": "awaiting_confirm",
+			})
+		default:
+			writeJSON(w, 200, struct {
+				State string `json:"state"`
+				trustBindingResp
+			}{
+				State: "confirmed",
+				trustBindingResp: trustBindingResp{
+					BindingID: "b", BindingToken: "t",
+					BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+				},
+			})
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	stdout, _, err := runCLI(t, "trust", "link",
+		"--base", srv.URL,
+		"--no-loopback", "--no-browser",
+		"--poll", "0", "--timeout", "5",
+	)
+	if err != nil {
+		t.Fatalf("trust link: %v", err)
+	}
+	if !strings.Contains(stdout, "Browser opened; waiting for you to click Confirm") {
+		t.Fatalf("expected confirm-phase prompt in stdout; got:\n%s", stdout)
+	}
+	// Should appear exactly once even though phase repeats across polls.
+	if got := strings.Count(stdout, "Browser opened; waiting for you to click Confirm"); got != 1 {
+		t.Fatalf("expected exactly 1 confirm-phase prompt, got %d:\n%s", got, stdout)
+	}
+}
+
 func TestHeadlessReason(t *testing.T) {
 	// Wipe every var the function inspects so each subtest starts clean.
 	for _, k := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "DISPLAY", "WAYLAND_DISPLAY"} {

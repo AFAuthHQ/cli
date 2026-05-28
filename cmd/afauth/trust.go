@@ -125,12 +125,22 @@ cannot bind a local port).
 					fmt.Fprintln(cmd.OutOrStdout(), "(opened in your browser)")
 				}
 			}
+			fmt.Fprintln(cmd.OutOrStdout(), "First time at trust.afauth.org? You'll be prompted to create an account.")
 			fmt.Fprintf(cmd.OutOrStdout(), "Waiting (expires in %ds)…\n", start.ExpiresIn)
 
 			binding, err := trustWaitForConfirmation(
 				ctx, base, start.ReqID, id.Seed, callback,
 				time.Duration(pollSec)*time.Second,
 				time.Duration(start.ExpiresIn)*time.Second,
+				func(phase string) {
+					// One-shot upgrade — the only transition that's
+					// worth surfacing is "browser landed on the
+					// confirm page; now waiting on the human's click."
+					if phase == "awaiting_confirm" {
+						fmt.Fprintln(cmd.OutOrStdout(),
+							"→ Browser opened; waiting for you to click Confirm…")
+					}
+				},
 			)
 			if err != nil {
 				return err
@@ -406,15 +416,22 @@ func trustLinkStart(
 // behavior). When the loopback fires, we still do a single /v1/link/
 // poll to actually fetch the binding token (the callback only signals
 // readiness; the token is delivered via /v1/link/poll).
+//
+// onPhase, when non-nil, is invoked from the polling loop each time
+// the server-reported phase changes (`awaiting_signin` →
+// `awaiting_confirm`). Lets the caller render a tighter waiting
+// message. Skipped on the loopback path because the loopback only
+// fires after confirmation — no intermediate phase to report.
 func trustWaitForConfirmation(
 	ctx context.Context,
 	base, reqID string,
 	seed []byte,
 	callback *loopbackCallback,
 	interval, total time.Duration,
+	onPhase func(phase string),
 ) (*trustBindingResp, error) {
 	if callback == nil {
-		return trustPollUntilConfirmed(ctx, base, reqID, seed, interval, total)
+		return trustPollUntilConfirmed(ctx, base, reqID, seed, interval, total, onPhase)
 	}
 	// Race the callback against the poll loop. Whichever signals first
 	// wins; the loser is cancelled via ctx.
@@ -462,6 +479,7 @@ func trustPollUntilConfirmed(
 	base, reqID string,
 	seed []byte,
 	interval, total time.Duration,
+	onPhase func(phase string),
 ) (*trustBindingResp, error) {
 	priv := ed25519.NewKeyFromSeed(seed)
 	sig := ed25519.Sign(priv, []byte(reqID))
@@ -471,6 +489,7 @@ func trustPollUntilConfirmed(
 	}
 	url := trustBase(base) + "/v1/link/poll"
 	deadline := time.Now().Add(total)
+	var lastPhase string
 	for {
 		var raw json.RawMessage
 		status, err := trustPostJSONStatus(ctx, url, "", body, &raw)
@@ -483,6 +502,7 @@ func trustPollUntilConfirmed(
 		default:
 			var probe struct {
 				State string `json:"state"`
+				Phase string `json:"phase"`
 			}
 			if jerr := json.Unmarshal(raw, &probe); jerr != nil {
 				return nil, jerr
@@ -494,7 +514,11 @@ func trustPollUntilConfirmed(
 				}
 				return &b, nil
 			}
-			// pending — keep polling.
+			// pending — emit phase if it changed and a listener is wired.
+			if onPhase != nil && probe.Phase != "" && probe.Phase != lastPhase {
+				lastPhase = probe.Phase
+				onPhase(probe.Phase)
+			}
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("trust link: timed out waiting for human confirmation")

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/afauthhq/cli/internal/identity"
 	"github.com/afauthhq/cli/internal/signing"
@@ -456,6 +457,167 @@ func TestSignupSurfacesAFAuthError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid_signature") {
 		t.Fatalf("error doesn't name code: %v", err)
+	}
+}
+
+// attestedDiscoveryDoc returns a discovery doc declaring §9.2
+// attested_only mode, used by the auto-attestation signup tests.
+func attestedDiscoveryDoc() map[string]any {
+	doc := discoveryDoc()
+	doc["billing"] = map[string]any{
+		"unclaimed_mode":     "attested_only",
+		"accepted_attestors": []string{"afauth-trust"},
+	}
+	return doc
+}
+
+// seedTrustState writes a trust.json under $AFAUTH_HOME so that
+// signup's auto-attestation branch has a binding to consult.
+func seedTrustState(t *testing.T, st trustState) {
+	t.Helper()
+	path, err := trustStatePath()
+	if err != nil {
+		t.Fatalf("trust state path: %v", err)
+	}
+	if err := saveTrustState(&st); err != nil {
+		t.Fatalf("seed trust state: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("seeded trust state not present: %v", err)
+	}
+}
+
+func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Fake trust attestor — mints a JWT when called with the seeded
+	// binding token. The CLI's autoAttest() should hit /v1/token.
+	stub := newStubTrust(t, 0, trustBindingResp{}, trustTokenResp{
+		JWT:       "fake.attestation.jwt",
+		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
+	}, "bind-tok")
+
+	seedTrustState(t, trustState{
+		BaseURL:                 stub.server.URL,
+		AgentDID:                "did:key:zSeeded",
+		BindingID:               "bind-1",
+		BindingToken:            "bind-tok",
+		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
+	})
+
+	srv := newMockService(t)
+	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, attestedDiscoveryDoc())
+	})
+	srv.mux.HandleFunc("/afauth/v1/accounts/me", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"state": "UNCLAIMED"})
+	})
+
+	_, stderr, err := runCLI(t, "signup", srv.URL())
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	if !strings.Contains(stderr, "attested via trust.afauth.org") {
+		t.Fatalf("stderr missing attestation breadcrumb: %q", stderr)
+	}
+	call := srv.lastCall("GET", "/afauth/v1/accounts/me")
+	if call == nil {
+		t.Fatal("no signed GET /accounts/me")
+	}
+	if got := call.Header.Get("AFAuth-Attestation"); got != "fake.attestation.jwt" {
+		t.Fatalf("AFAuth-Attestation header = %q, want fake.attestation.jwt", got)
+	}
+}
+
+func TestSignupAttestedOnlyNoLinkPrompts(t *testing.T) {
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	srv := newMockService(t)
+	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, attestedDiscoveryDoc())
+	})
+	// /accounts/me handler intentionally absent — signup should bail
+	// out before issuing any signed request.
+
+	_, _, err := runCLI(t, "signup", srv.URL())
+	if err == nil {
+		t.Fatal("expected error when service requires attestation but no agent is linked")
+	}
+	if !strings.Contains(err.Error(), "afauth trust link") {
+		t.Fatalf("error must point at `afauth trust link`: %v", err)
+	}
+	if c := srv.lastCall("GET", "/afauth/v1/accounts/me"); c != nil {
+		t.Fatal("CLI should not call the service when no binding exists")
+	}
+}
+
+func TestSignupAttestedOnlyExpiredLinkPrompts(t *testing.T) {
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	seedTrustState(t, trustState{
+		BaseURL:                 "https://trust.example",
+		AgentDID:                "did:key:zExpired",
+		BindingID:               "bind-x",
+		BindingToken:            "stale",
+		BindingTokenExpiresUnix: time.Now().Add(-time.Hour).Unix(),
+	})
+
+	srv := newMockService(t)
+	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, attestedDiscoveryDoc())
+	})
+
+	_, _, err := runCLI(t, "signup", srv.URL())
+	if err == nil {
+		t.Fatal("expected error when binding is expired")
+	}
+	if !strings.Contains(err.Error(), "expired") || !strings.Contains(err.Error(), "afauth trust link") {
+		t.Fatalf("expired-binding error must guide user to re-link: %v", err)
+	}
+}
+
+func TestSignupOpenModeSkipsAttestation(t *testing.T) {
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Open service (no billing block at all). Even if a trust binding
+	// exists, the CLI must NOT mint an attestation.
+	seedTrustState(t, trustState{
+		BaseURL:                 "https://trust.example",
+		AgentDID:                "did:key:zLinkedButUnused",
+		BindingID:               "bind-y",
+		BindingToken:            "tok",
+		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
+	})
+
+	srv := newMockService(t)
+	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, discoveryDoc()) // no billing block
+	})
+	srv.mux.HandleFunc("/afauth/v1/accounts/me", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"state": "UNCLAIMED"})
+	})
+
+	if _, _, err := runCLI(t, "signup", srv.URL()); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	call := srv.lastCall("GET", "/afauth/v1/accounts/me")
+	if call == nil {
+		t.Fatal("no signed GET /accounts/me")
+	}
+	if got := call.Header.Get("AFAuth-Attestation"); got != "" {
+		t.Fatalf("open-mode signup must not send AFAuth-Attestation; got %q", got)
 	}
 }
 

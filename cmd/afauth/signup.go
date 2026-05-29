@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/afauthhq/cli/internal/accounts"
@@ -31,9 +33,15 @@ By default uses implicit signup (§6.3) — a signed GET of /accounts/me
 auto-creates the account in UNCLAIMED state. If the service requires
 explicit signup, retries with POST /accounts.
 
+When the service's discovery doc declares §9.2 attested_only mode and
+--attest is NOT set, signup automatically mints an attestation JWT
+from the cached trust binding (audience-bound to the service's DID).
+If no binding exists or the binding has expired, signup exits with
+instructions to run "afauth trust link" first.
+
   afauth signup https://api.example.com
   afauth signup --explicit --terms-version 2026-05-01 https://api.example.com
-  afauth signup --attest <jwt> https://api.example.com  # for attested_only services`,
+  afauth signup --attest <jwt> https://api.example.com  # bypass auto-mint`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), time.Duration(timeoutSec)*time.Second)
@@ -48,6 +56,18 @@ explicit signup, retries with POST /accounts.
 			doc, err := discovery.Fetch(ctx, serviceURL, nil)
 			if err != nil {
 				return fmt.Errorf("signup: discovery: %w", err)
+			}
+
+			// Discovery-driven attestation: §9.2 attested_only services
+			// MUST receive a valid AFAuth-Attestation header. When the
+			// caller didn't pass --attest, the CLI auto-mints one from
+			// the cached trust binding. If the service doesn't require
+			// attestation, this branch is skipped (existing behaviour).
+			if attestation == "" && requiresAttestation(doc) {
+				attestation, err = autoAttest(ctx, doc, cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
 			}
 
 			c := client.New(id)
@@ -87,7 +107,7 @@ explicit signup, retries with POST /accounts.
 	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default ~/.afauth/key.json)")
 	cmd.Flags().BoolVar(&explicit, "explicit", false, "use the §6.4 POST /accounts flow instead of implicit signup")
 	cmd.Flags().StringVar(&termsVersion, "terms-version", "", "terms version to send with explicit signup")
-	cmd.Flags().StringVar(&attestation, "attest", "", "AFAuth-Attestation JWT (for attested_only services)")
+	cmd.Flags().StringVar(&attestation, "attest", "", "AFAuth-Attestation JWT (overrides the auto-mint from `afauth trust link`)")
 	cmd.Flags().IntVar(&timeoutSec, "timeout", 30, "request timeout in seconds")
 	return cmd
 }
@@ -160,4 +180,35 @@ func readAccountState(body []byte) (string, error) {
 		return "", err
 	}
 	return out.State, nil
+}
+
+// requiresAttestation reports whether the service's discovery doc
+// declares §9.2 attested_only mode. Services in other modes (open,
+// denied, or unset) do not require an AFAuth-Attestation header on
+// implicit signup.
+func requiresAttestation(doc *discovery.Document) bool {
+	return doc != nil && doc.Billing != nil && doc.Billing.UnclaimedMode == "attested_only"
+}
+
+// autoAttest mints a fresh §10 attestation JWT from the cached
+// trust.afauth.org binding, audience-bound to doc.ServiceDID. Returns
+// a friendly error pointing at `afauth trust link` when no binding
+// exists or the cached binding has expired.
+func autoAttest(ctx context.Context, doc *discovery.Document, stderr interface{ Write([]byte) (int, error) }) (string, error) {
+	st, err := loadTrustState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("service requires a trust attestation, but no agent is linked.\n  run: afauth trust link\n  then re-run this command")
+		}
+		return "", fmt.Errorf("signup: load trust binding: %w", err)
+	}
+	if st.BindingTokenExpiresUnix > 0 && time.Now().Unix() >= st.BindingTokenExpiresUnix {
+		return "", fmt.Errorf("trust binding expired.\n  run: afauth trust link\n  then re-run this command")
+	}
+	tok, err := trustToken(ctx, st.BaseURL, st.BindingToken, doc.ServiceDID)
+	if err != nil {
+		return "", fmt.Errorf("signup: mint attestation: %w", explainTrustError(err))
+	}
+	fmt.Fprintln(stderr, "attested via trust.afauth.org")
+	return tok.JWT, nil
 }

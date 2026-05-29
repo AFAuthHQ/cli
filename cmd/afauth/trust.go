@@ -31,7 +31,7 @@ import (
 //                          revocation lives in the human dashboard at
 //                          trust.afauth.org/account)
 //
-// Binding state lives at ~/.config/afauth/trust.json with chmod 600
+// Binding state lives at ~/.afauth/trust.json with chmod 600
 // alongside the agent's key. The file is rewritten atomically on
 // every change.
 
@@ -70,7 +70,7 @@ func newTrustLinkCmd() *cobra.Command {
 		Short: "Bind this agent to a human-controlled account",
 		Long: `Opens a deep-link the human visits in their browser. After they
 confirm, the binding token is fetched and persisted at
-~/.config/afauth/trust.json.
+~/.afauth/trust.json.
 
 By default the CLI starts a tiny loopback HTTP server on a random
 local port; the browser hits it after the human confirms, and this

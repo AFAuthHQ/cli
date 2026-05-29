@@ -55,9 +55,13 @@ afauth keys import backup.json
 
 # Trust attestor (AFAP-0006) — bind to a human account, mint §10 JWTs
 afauth trust link                                # browse to trust.afauth.org, confirm
-afauth trust token did:web:tavily.com            # mint an audience-bound JWT
+afauth signup https://tavily.com                 # auto-mints attestation when the
+                                                 # service declares attested_only;
+                                                 # exits with `afauth trust link`
+                                                 # prompt if no binding exists.
+afauth trust token did:web:tavily.com            # mint an audience-bound JWT manually
 afauth signup --attest "$(afauth trust token did:web:tavily.com)" \
-              https://tavily.com                 # use it against an attested_only service
+              https://tavily.com                 # override the auto-mint (testing)
 afauth trust status                              # show the cached binding
 afauth trust forget                              # delete the local binding
 ```

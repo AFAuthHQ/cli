@@ -143,10 +143,7 @@ func Fetch(ctx context.Context, baseURL string, hc *http.Client) (*Document, err
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}
 	}
-	u := strings.TrimRight(baseURL, "/")
-	if !strings.HasSuffix(u, "/.well-known/afauth") {
-		u = u + "/.well-known/afauth"
-	}
+	u := discoveryURL(baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("discovery: build request: %w", err)
@@ -169,6 +166,23 @@ func Fetch(ctx context.Context, baseURL string, hc *http.Client) (*Document, err
 		return nil, fmt.Errorf("discovery: read body: %w", err)
 	}
 	return Parse(body)
+}
+
+// discoveryURL turns baseURL into the absolute /.well-known/afauth URL.
+// baseURL MAY be a bare host ("api.example.com"), an origin
+// ("https://api.example.com"), or an explicit URL already ending in
+// /.well-known/afauth; discoveryURL normalises all three.
+func discoveryURL(baseURL string) string {
+	u := strings.TrimRight(baseURL, "/")
+	if !strings.Contains(u, "://") {
+		// §4.1 discovery is HTTPS; a scheme-less host defaults to https
+		// rather than failing with `unsupported protocol scheme ""`.
+		u = "https://" + u
+	}
+	if !strings.HasSuffix(u, "/.well-known/afauth") {
+		u = u + "/.well-known/afauth"
+	}
+	return u
 }
 
 func isJSONContentType(ct string) bool {

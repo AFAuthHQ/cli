@@ -262,6 +262,7 @@ token and prints the resulting JWT to stdout. The JWT is short-lived
 			if err != nil {
 				return explainTrustError(err)
 			}
+			cacheVerification(st, tok.Verification)
 			fmt.Fprintln(cmd.OutOrStdout(), tok.JWT)
 			return nil
 		},
@@ -589,6 +590,13 @@ type trustState struct {
 	BindingID               string `json:"binding_id"`
 	BindingToken            string `json:"binding_token"`
 	BindingTokenExpiresUnix int64  `json:"binding_token_expires_at"`
+	// Verification is the strongest human-verification method the
+	// attestor reported at the most recent /v1/token mint (email,
+	// oauth, payment). Cached so `afauth status` can show how the agent
+	// is linked without a network call; it may lag the attestor, since
+	// it is only refreshed when a token is minted.
+	Verification         string `json:"verification,omitempty"`
+	VerificationSeenUnix int64  `json:"verification_seen_at,omitempty"`
 }
 
 const trustStateVersion = 1
@@ -641,6 +649,20 @@ func loadTrustState() (*trustState, error) {
 		return nil, fmt.Errorf("trust: parse %s: %w", path, err)
 	}
 	return &st, nil
+}
+
+// cacheVerification records the verification method returned by a
+// successful /v1/token mint into the local binding, so `afauth status`
+// can report how the agent is linked without a network round-trip.
+// Best-effort: a persistence failure must never fail a mint that has
+// already succeeded, so the error is swallowed.
+func cacheVerification(st *trustState, verification string) {
+	if st == nil || verification == "" || verification == st.Verification {
+		return
+	}
+	st.Verification = verification
+	st.VerificationSeenUnix = time.Now().Unix()
+	_ = saveTrustState(st)
 }
 
 func base64URLNoPad(b []byte) string {

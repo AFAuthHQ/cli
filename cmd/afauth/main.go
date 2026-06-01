@@ -37,6 +37,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		newInitCmd(),
 		newWhoamiCmd(),
+		newStatusCmd(),
 		newDiscoverCmd(),
 		newCallCmd(),
 		newSignupCmd(),

@@ -72,16 +72,20 @@ func newTrustLinkCmd() *cobra.Command {
 confirm, the binding token is fetched and persisted at
 ~/.afauth/trust.json.
 
-By default the CLI starts a tiny loopback HTTP server on a random
-local port; the browser hits it after the human confirms, and this
-process returns immediately. Pass --no-loopback to fall back to
-fixed-interval polling (useful for headless / sandboxed agents that
-cannot bind a local port).
+The CLI polls the attestor in the background until the human confirms,
+so the link completes even when the agent runs headless — e.g. you're
+SSH'd into a remote host and confirm in your laptop's browser. On a
+local desktop it additionally starts a tiny loopback server so the
+browser can ping back the instant you confirm, skipping the poll wait.
+
+A remote SSH session or a display-less Linux box is detected
+automatically and the loopback shortcut is skipped (it could never be
+reached). Pass --no-loopback to force polling-only mode anywhere.
 
   afauth trust link                                 # uses trust.afauth.org
   afauth trust link --base http://localhost:3001    # dev / staging
   afauth trust link --label "claude on wen-mbp"     # shown on the confirm page
-  afauth trust link --no-loopback                   # polling only
+  afauth trust link --no-loopback                   # polling only (auto under SSH)
 `,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), time.Duration(timeoutSec)*time.Second)
@@ -99,8 +103,18 @@ cannot bind a local port).
 			var callback *loopbackCallback
 			callbackURL := ""
 			if !noLoopback {
-				cb, err := startLoopbackCallback(ctx)
-				if err != nil {
+				if reason := headlessReason(); reason != "" {
+					// No local browser can reach our loopback port. Most
+					// commonly the agent is SSH'd into a remote host: the
+					// human confirms in their own browser, whose
+					// post-confirm redirect targets THEIR loopback, not
+					// ours — so the callback could never fire. Starting it
+					// would also make the confirm page offer a dead "Return
+					// to the agent" button. Skip it; the poll loop completes
+					// the link either way.
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"%s — using polling (a loopback callback can't be reached from here)\n", reason)
+				} else if cb, err := startLoopbackCallback(ctx); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"loopback callback unavailable (%v); falling back to polling\n", err)
 				} else {
@@ -165,9 +179,9 @@ cannot bind a local port).
 	cmd.Flags().StringVar(&base, "base", "", "trust attestor base URL (default https://trust.afauth.org)")
 	cmd.Flags().StringVar(&label, "label", "", "short label shown on the confirm page")
 	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default ~/.afauth/key.json)")
-	cmd.Flags().IntVar(&pollSec, "poll", 3, "seconds between poll attempts (loopback fallback)")
+	cmd.Flags().IntVar(&pollSec, "poll", 3, "seconds between poll attempts")
 	cmd.Flags().IntVar(&timeoutSec, "timeout", 600, "give up after N seconds")
-	cmd.Flags().BoolVar(&noLoopback, "no-loopback", false, "disable the loopback callback shortcut")
+	cmd.Flags().BoolVar(&noLoopback, "no-loopback", false, "force polling-only; skip the loopback callback shortcut (auto-skipped when headless)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-open the link in a browser (just print it)")
 	return cmd
 }
@@ -407,21 +421,25 @@ func trustLinkStart(
 	return &out, nil
 }
 
-// trustWaitForConfirmation races the polling loop against an optional
-// loopback callback. The first to fire ends the wait — the callback
-// short-circuits typical wall-clock latency to "human's click time"
-// instead of "next poll tick", at the cost of binding to a local port.
+// trustWaitForConfirmation drives the poll loop, optionally accelerated
+// by a loopback callback. Polling is the source of truth: it is what
+// actually fetches the binding token from /v1/link/poll, and it completes
+// the link whether or not the callback ever fires. When a callback is
+// present, its Done channel only wakes the loop early — collapsing
+// typical wall-clock latency from "next poll tick" to "the human's click
+// time" — without being load-bearing for correctness.
 //
-// When callback is nil, this degrades to pure polling (the previous
-// behavior). When the loopback fires, we still do a single /v1/link/
-// poll to actually fetch the binding token (the callback only signals
-// readiness; the token is delivered via /v1/link/poll).
+// That distinction matters for split-machine setups. When the agent is
+// SSH'd into a remote host and the human confirms in their laptop's
+// browser, the browser's post-confirm redirect hits the LAPTOP's loopback
+// port, not the agent's — so the callback never fires. Because the poll
+// loop runs regardless, the link still completes. (An earlier version
+// waited on the callback alone, which hung until timeout in exactly this
+// case.)
 //
-// onPhase, when non-nil, is invoked from the polling loop each time
-// the server-reported phase changes (`awaiting_signin` →
-// `awaiting_confirm`). Lets the caller render a tighter waiting
-// message. Skipped on the loopback path because the loopback only
-// fires after confirmation — no intermediate phase to report.
+// onPhase, when non-nil, is invoked each time the server-reported phase
+// changes (`awaiting_signin` → `awaiting_confirm`), letting the caller
+// render a tighter waiting message.
 func trustWaitForConfirmation(
 	ctx context.Context,
 	base, reqID string,
@@ -430,56 +448,26 @@ func trustWaitForConfirmation(
 	interval, total time.Duration,
 	onPhase func(phase string),
 ) (*trustBindingResp, error) {
-	if callback == nil {
-		return trustPollUntilConfirmed(ctx, base, reqID, seed, interval, total, onPhase)
+	var wake <-chan struct{}
+	if callback != nil {
+		wake = callback.Done()
 	}
-	// Race the callback against the poll loop. Whichever signals first
-	// wins; the loser is cancelled via ctx.
-	waitCtx, cancel := context.WithTimeout(ctx, total)
-	defer cancel()
-	select {
-	case <-callback.Done():
-		// One immediate poll to pull the binding token.
-		return trustPollOnce(waitCtx, base, reqID, seed)
-	case <-waitCtx.Done():
-		return nil, fmt.Errorf("trust link: timed out waiting for human confirmation")
-	}
+	return trustPollUntilConfirmed(ctx, base, reqID, seed, interval, total, onPhase, wake)
 }
 
-func trustPollOnce(ctx context.Context, base, reqID string, seed []byte) (*trustBindingResp, error) {
-	priv := ed25519.NewKeyFromSeed(seed)
-	sig := ed25519.Sign(priv, []byte(reqID))
-	body := map[string]string{
-		"req_id":  reqID,
-		"sig_b64": base64URLNoPad(sig),
-	}
-	var raw json.RawMessage
-	_, err := trustPostJSONStatus(ctx, trustBase(base)+"/v1/link/poll", "", body, &raw)
-	if err != nil {
-		return nil, err
-	}
-	var probe struct {
-		State string `json:"state"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return nil, err
-	}
-	if probe.State != "confirmed" {
-		return nil, fmt.Errorf("trust link: callback fired but server still reports %q", probe.State)
-	}
-	var b trustBindingResp
-	if err := json.Unmarshal(raw, &b); err != nil {
-		return nil, err
-	}
-	return &b, nil
-}
-
+// trustPollUntilConfirmed polls /v1/link/poll until the request is
+// confirmed, the deadline passes, or ctx is cancelled. If wake is
+// non-nil, a signal on it triggers an immediate poll instead of waiting
+// out the interval (used by the loopback callback). wake fires at most
+// once per call: after it does, it's dropped so a closed channel can't
+// busy-loop the select.
 func trustPollUntilConfirmed(
 	ctx context.Context,
 	base, reqID string,
 	seed []byte,
 	interval, total time.Duration,
 	onPhase func(phase string),
+	wake <-chan struct{},
 ) (*trustBindingResp, error) {
 	priv := ed25519.NewKeyFromSeed(seed)
 	sig := ed25519.Sign(priv, []byte(reqID))
@@ -526,6 +514,11 @@ func trustPollUntilConfirmed(
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-wake:
+			// Loopback callback fired — poll immediately rather than
+			// waiting out the interval. Drop the channel so the now-closed
+			// channel doesn't spin the select on subsequent iterations.
+			wake = nil
 		case <-time.After(interval):
 		}
 	}

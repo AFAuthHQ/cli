@@ -262,10 +262,13 @@ func TestTrustPoll_SignaturesValid(t *testing.T) {
 	}
 }
 
-func TestTrustLink_LoopbackCallback(t *testing.T) {
-	// Loopback path: the trust attestor returns confirmed on first poll;
-	// but importantly, the CLI passes a non-empty callback_url and waits
-	// for the loopback channel to fire instead of doing a polling loop.
+func TestTrustLink_LoopbackCallbackAccelerates(t *testing.T) {
+	// On a local machine (non-headless) the loopback callback wakes the
+	// poll loop the instant the human confirms, instead of waiting out
+	// the poll interval. We prove the wake works by setting a poll
+	// interval far longer than the test timeout: the link can ONLY
+	// complete in time if the callback fires and pulls the loop forward.
+	forceNonHeadless(t) // exercise the loopback path, not the headless auto-skip
 	home := withTempHome(t)
 	if _, _, err := runCLI(t, "init"); err != nil {
 		t.Fatalf("init: %v", err)
@@ -274,8 +277,8 @@ func TestTrustLink_LoopbackCallback(t *testing.T) {
 	var captured struct {
 		mu          sync.Mutex
 		callbackURL string
-		hitCallback bool
 	}
+	var pollN atomic.Int32
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/link/start", func(w http.ResponseWriter, r *http.Request) {
@@ -290,25 +293,26 @@ func TestTrustLink_LoopbackCallback(t *testing.T) {
 			ReqID: "req-cb", LinkURL: "http://example/link", PollURL: "http://example/poll", ExpiresIn: 30,
 		})
 
-		// Simulate the human confirming: hit the agent's loopback callback
-		// from the server side after a tiny pause.
+		// Simulate the human confirming in a browser on THIS machine: hit
+		// the agent's loopback callback from the server side after a pause.
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			captured.mu.Lock()
 			cb := captured.callbackURL
 			captured.mu.Unlock()
 			if cb != "" {
-				resp, err := http.Get(cb)
-				if err == nil {
+				if resp, err := http.Get(cb); err == nil {
 					resp.Body.Close()
-					captured.mu.Lock()
-					captured.hitCallback = true
-					captured.mu.Unlock()
 				}
 			}
 		}()
 	})
 	mux.HandleFunc("/v1/link/poll", func(w http.ResponseWriter, r *http.Request) {
+		// Poll #1 is pending; only the callback-woken poll (#2) confirms.
+		if pollN.Add(1) <= 1 {
+			writeJSON(w, 200, map[string]string{"state": "pending"})
+			return
+		}
 		writeJSON(w, 200, struct {
 			State string `json:"state"`
 			trustBindingResp
@@ -324,22 +328,22 @@ func TestTrustLink_LoopbackCallback(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	stdout, _, err := runCLI(t, "trust", "link",
-		"--base", srv.URL, "--no-browser", "--timeout", "5",
+		"--base", srv.URL, "--no-browser",
+		"--poll", "30", // >> --timeout: only a callback wake can finish in time
+		"--timeout", "5",
 	)
 	if err != nil {
-		t.Fatalf("trust link: %v", err)
+		t.Fatalf("trust link (callback should wake the poll loop): %v", err)
 	}
 	if !strings.Contains(stdout, "linked ✓") {
 		t.Fatalf("want linked, got: %s", stdout)
 	}
 
 	captured.mu.Lock()
-	defer captured.mu.Unlock()
-	if !captured.hitCallback {
-		t.Fatalf("expected the loopback callback to have been hit by the simulated browser")
-	}
-	if !strings.HasPrefix(captured.callbackURL, "http://127.0.0.1:") {
-		t.Fatalf("callback URL not loopback: %q", captured.callbackURL)
+	cb := captured.callbackURL
+	captured.mu.Unlock()
+	if !strings.HasPrefix(cb, "http://127.0.0.1:") {
+		t.Fatalf("callback URL not loopback: %q", cb)
 	}
 
 	// trust.json should exist and be 0600.
@@ -348,6 +352,112 @@ func TestTrustLink_LoopbackCallback(t *testing.T) {
 		t.Fatalf("stat trust.json: %v", err)
 	} else if st.Mode().Perm() != 0o600 {
 		t.Fatalf("trust.json mode = %o", st.Mode().Perm())
+	}
+}
+
+func TestTrustLink_LoopbackUnreachable_PollRescues(t *testing.T) {
+	// Regression for the SSH/split-machine case: the agent is on a remote
+	// host (loopback ENABLED), but the human confirms in a browser on a
+	// DIFFERENT machine, so the callback is never hit — its post-confirm
+	// redirect lands on the human's own loopback, not ours. The
+	// background poll loop must still complete the link. Before the fix,
+	// the CLI waited on the callback alone and hung until --timeout.
+	forceNonHeadless(t) // loopback IS started; nothing ever hits it
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	binding := trustBindingResp{
+		BindingID: "b-rescue", BindingToken: "t-rescue",
+		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}
+	// confirmAfter=1: poll #1 pending, poll #2 confirmed. The stub never
+	// touches the callback URL, so only polling can finish the link.
+	stub := newStubTrust(t, 1, binding, trustTokenResp{}, "")
+
+	stdout, _, err := runCLI(t, "trust", "link",
+		"--base", stub.server.URL,
+		"--no-browser",
+		"--poll", "0", // tight poll so the rescue is quick
+		"--timeout", "5",
+	)
+	if err != nil {
+		t.Fatalf("expected the poll loop to rescue an unreachable callback, got: %v", err)
+	}
+	if !strings.Contains(stdout, "linked ✓") {
+		t.Fatalf("want 'linked ✓', got: %s", stdout)
+	}
+	if c := stub.pollCount.Load(); c < 2 {
+		t.Fatalf("expected ≥2 polls (pending→confirmed), got %d", c)
+	}
+}
+
+func TestTrustLink_HeadlessSkipsLoopback(t *testing.T) {
+	// Under SSH (or a display-less Linux box) the loopback callback can
+	// never be reached, so the CLI must not start it or advertise a
+	// callback_url — the confirm page would otherwise offer a dead
+	// "Return to the agent" button. Polling alone drives the link, and
+	// the user is told why.
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 2222 10.0.0.2 22")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	var mu sync.Mutex
+	var gotCallback string
+	var sawStart bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/link/start", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		gotCallback, _ = body["callback_url"].(string)
+		sawStart = true
+		mu.Unlock()
+		writeJSON(w, 200, trustLinkStartResp{
+			ReqID: "req-headless", LinkURL: "http://example/link",
+			PollURL: "http://example/poll", ExpiresIn: 30,
+		})
+	})
+	mux.HandleFunc("/v1/link/poll", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, struct {
+			State string `json:"state"`
+			trustBindingResp
+		}{
+			State: "confirmed",
+			trustBindingResp: trustBindingResp{
+				BindingID: "b-h", BindingToken: "t-h",
+				BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
+			},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	stdout, stderr, err := runCLI(t, "trust", "link",
+		"--base", srv.URL, "--no-browser", "--poll", "0", "--timeout", "5",
+	)
+	if err != nil {
+		t.Fatalf("trust link: %v", err)
+	}
+	if !strings.Contains(stdout, "linked ✓") {
+		t.Fatalf("want 'linked ✓', got: %s", stdout)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawStart {
+		t.Fatal("server never received /v1/link/start")
+	}
+	if gotCallback != "" {
+		t.Fatalf("headless link must NOT advertise a callback_url, got %q", gotCallback)
+	}
+	if !strings.Contains(stderr, "using polling") {
+		t.Fatalf("expected a headless→polling notice on stderr, got: %s", stderr)
 	}
 }
 
@@ -540,6 +650,19 @@ func TestTrustLink_NoBrowserFlagSuppressesOpenAttempt(t *testing.T) {
 	if strings.Contains(stderr, "could not auto-open browser") {
 		t.Fatalf("--no-browser should suppress the open-failure line; stderr: %s", stderr)
 	}
+}
+
+// forceNonHeadless clears the env signals headlessReason() inspects so a
+// test exercises the loopback path rather than the SSH/headless auto-skip.
+// DISPLAY satisfies the Linux check; on macOS/Windows the empty SSH vars
+// are enough (DISPLAY is ignored there).
+func forceNonHeadless(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("WAYLAND_DISPLAY", "")
 }
 
 func mustHex(t *testing.T, s string) []byte {

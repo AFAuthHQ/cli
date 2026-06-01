@@ -44,7 +44,9 @@ Step 2 is required for `attested_only` services; skip it and `afauth signup` exi
 ```bash
 # Identity
 afauth init                              # generate keypair → ~/.afauth/key.json
-afauth whoami                            # print did:key:…
+afauth whoami                            # print did:key:… (bare, for scripts)
+afauth status                            # identity + attestor linkage + accounts (human)
+afauth status --json                     # same, machine-readable
 
 # Discovery and generic signed requests
 afauth discover https://api.example.com

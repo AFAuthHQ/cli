@@ -2,7 +2,7 @@
 
 > The reference command-line interface for the [AFAuth Protocol](https://github.com/AFAuthHQ/spec) — **Agent-First Auth**, the open protocol that makes AI agents first-class citizens of every service.
 
-Human attention is finite. Agent attention is exploding. AFAuth is how that new attention reaches services — and how your agent reaches every service. `afauth` is the reference agent runtime: a single static binary that generates an identity, signs requests, signs your agent up to any AFAuth-supporting service on its own, and hands off ownership to a human only if you want it to.
+Human attention is finite. Agent attention is exploding. AFAuth is how that new attention reaches services — and how your agent reaches every service. `afauth` is the reference agent runtime: a single static binary that generates an identity, links once to a human at [trust.afauth.org](https://trust.afauth.org) so spam-resistant services accept it, signs your agent up to any AFAuth-supporting service on its own, and hands off ownership to a human later if you want it to.
 
 ## Status
 
@@ -26,6 +26,20 @@ go install github.com/afauthhq/cli/cmd/afauth@latest
 ```
 
 ## Usage
+
+### Quick start
+
+```bash
+afauth init                                 # 1. generate keypair → ~/.afauth/key.json
+afauth trust link                           # 2. bind to a human at trust.afauth.org (one-time)
+afauth signup https://api.example.com       # 3. sign up — auto-mints an attestation when the
+                                            #    service declares attested_only (most do)
+afauth call https://api.example.com/afauth/v1/accounts/me   # 4. signed requests thereafter
+```
+
+Step 2 is required for `attested_only` services; skip it and `afauth signup` exits with a prompt to run `afauth trust link` first.
+
+### All commands
 
 ```bash
 # Identity

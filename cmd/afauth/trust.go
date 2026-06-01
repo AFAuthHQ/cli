@@ -234,7 +234,10 @@ func headlessReason() string {
 // ---------------------------------------------------------------------
 
 func newTrustTokenCmd() *cobra.Command {
-	var timeoutSec int
+	var (
+		timeoutSec int
+		keyPath    string
+	)
 	cmd := &cobra.Command{
 		Use:   "token <service-did>",
 		Short: "Mint a §10 attestation JWT for the given service",
@@ -258,6 +261,21 @@ token and prints the resulting JWT to stdout. The JWT is short-lived
 				}
 				return err
 			}
+			// Refuse to mint from a binding that belongs to a different
+			// key: the JWT's sub would be the old DID while the agent
+			// signs requests with the active key, so any service would
+			// reject the pair. Catch it locally with an actionable hint.
+			id, err := loadIdentity(keyPath)
+			if err != nil {
+				return err
+			}
+			activeDID, err := id.DID()
+			if err != nil {
+				return err
+			}
+			if bindingIsOrphaned(st, activeDID) {
+				return fmt.Errorf("trust token: binding is for %s, but the active key is %s — re-link with `afauth trust link`", st.AgentDID, activeDID)
+			}
 			tok, err := trustToken(ctx, st.BaseURL, st.BindingToken, args[0])
 			if err != nil {
 				return explainTrustError(err)
@@ -268,6 +286,7 @@ token and prints the resulting JWT to stdout. The JWT is short-lived
 		},
 	}
 	cmd.Flags().IntVar(&timeoutSec, "timeout", 30, "request timeout in seconds")
+	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default ~/.afauth/key.json)")
 	return cmd
 }
 
@@ -665,6 +684,34 @@ func cacheVerification(st *trustState, verification string) {
 	_ = saveTrustState(st)
 }
 
+// bindingIsOrphaned reports whether the cached binding belongs to a
+// DIFFERENT key than the active one — e.g. one left behind by a key
+// rotation or import. An orphaned binding MUST NOT be used to mint or
+// send an attestation: the JWT would assert the old DID while requests
+// are signed by the new key, so the service rejects it. A binding with
+// no recorded agent_did (legacy/hand-edited) is treated as not-orphaned,
+// matching `afauth status`.
+func bindingIsOrphaned(st *trustState, activeDID string) bool {
+	return st != nil && st.AgentDID != "" && st.AgentDID != activeDID
+}
+
+// warnIfBindingStale prints a non-fatal notice when the local trust
+// binding no longer matches the active key (after a key change), so the
+// operator knows to re-link. Deliberately NON-destructive: it does not
+// clear the binding, because the binding_token remains a live
+// attestation-minting credential at the attestor (~90 days) until
+// revoked THERE — clearing it locally would only hide that exposure.
+func warnIfBindingStale(w io.Writer, activeDID string) {
+	st, err := loadTrustState()
+	if err != nil {
+		return // no binding (or unreadable) — nothing to warn about
+	}
+	if bindingIsOrphaned(st, activeDID) {
+		fmt.Fprintf(w, "⚠ trust binding is for a previous key (%s); re-link with `afauth trust link`.\n", st.AgentDID)
+		fmt.Fprintln(w, "  the old binding stays live at the attestor (~90d) — revoke it at trust.afauth.org/account")
+	}
+}
+
 func base64URLNoPad(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
@@ -709,7 +756,7 @@ func startLoopbackCallback(ctx context.Context) (*loopbackCallback, error) {
 	return cb, nil
 }
 
-func (c *loopbackCallback) URL() string         { return c.url }
+func (c *loopbackCallback) URL() string           { return c.url }
 func (c *loopbackCallback) Done() <-chan struct{} { return c.done }
 func (c *loopbackCallback) Close() {
 	if c.server != nil {

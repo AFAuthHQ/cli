@@ -107,6 +107,7 @@ type linkSummary struct {
 type accountsSummary struct {
 	Services int            `json:"services"`
 	ByState  map[string]int `json:"by_state,omitempty"`
+	Stranded int            `json:"stranded,omitempty"`
 }
 
 // gatherStatus assembles the snapshot from local files. A missing key
@@ -140,7 +141,7 @@ func gatherStatus(keyPath string) (*statusInfo, error) {
 		Algorithm:    "ed25519",
 		PublicKeyHex: hex.EncodeToString(id.PublicKey),
 		Link:         loadLinkSummary(did),
-		Accounts:     loadAccountsSummary(),
+		Accounts:     loadAccountsSummary(did),
 	}
 	if fi, statErr := os.Stat(path); statErr == nil {
 		info.CreatedAt = fi.ModTime().UTC().Format(time.RFC3339)
@@ -177,7 +178,7 @@ func loadLinkSummary(activeDID string) *linkSummary {
 // e.g. after a rotation that left trust.json behind) takes priority over
 // expiry, since the binding is unusable by the active key regardless.
 func linkState(st *trustState, activeDID string) string {
-	if st.AgentDID != "" && st.AgentDID != activeDID {
+	if bindingIsOrphaned(st, activeDID) {
 		return "orphaned"
 	}
 	if st.BindingTokenExpiresUnix > 0 {
@@ -195,7 +196,7 @@ func linkState(st *trustState, activeDID string) string {
 
 // loadAccountsSummary reads the local accounts ledger and tallies state.
 // The ledger is keyed one entry per service, so the count is "services".
-func loadAccountsSummary() *accountsSummary {
+func loadAccountsSummary(activeDID string) *accountsSummary {
 	path, err := accounts.DefaultPath()
 	if err != nil {
 		return nil
@@ -216,6 +217,12 @@ func loadAccountsSummary() *accountsSummary {
 			state = "UNKNOWN"
 		}
 		sum.ByState[state]++
+		// An entry bound to a different DID was stranded by a key change
+		// at this agent — the account lives under the old key until
+		// re-rotated against that service.
+		if e.AgentDID != "" && e.AgentDID != activeDID {
+			sum.Stranded++
+		}
 	}
 	return sum
 }
@@ -273,7 +280,11 @@ func renderAccountsLine(s *accountsSummary) string {
 	if s.Services == 1 {
 		noun = "service"
 	}
-	return fmt.Sprintf("%d %s — %s   → afauth accounts list", s.Services, noun, strings.Join(parts, ", "))
+	line := fmt.Sprintf("%d %s — %s", s.Services, noun, strings.Join(parts, ", "))
+	if s.Stranded > 0 {
+		line += fmt.Sprintf("; %d stranded under a previous key (re-rotate)", s.Stranded)
+	}
+	return line + "   → afauth accounts list"
 }
 
 // verifSuffix renders the cached verification method, e.g. " (email)".

@@ -57,6 +57,10 @@ instructions to run "afauth trust link" first.
 			if err != nil {
 				return fmt.Errorf("signup: discovery: %w", err)
 			}
+			did, err := id.DID()
+			if err != nil {
+				return err
+			}
 
 			// Discovery-driven attestation: §9.2 attested_only services
 			// MUST receive a valid AFAuth-Attestation header. When the
@@ -64,7 +68,7 @@ instructions to run "afauth trust link" first.
 			// the cached trust binding. If the service doesn't require
 			// attestation, this branch is skipped (existing behaviour).
 			if attestation == "" && requiresAttestation(doc) {
-				attestation, err = autoAttest(ctx, doc, cmd.ErrOrStderr())
+				attestation, err = autoAttest(ctx, doc, did, cmd.ErrOrStderr())
 				if err != nil {
 					return err
 				}
@@ -92,7 +96,6 @@ instructions to run "afauth trust link" first.
 			if err != nil {
 				return err
 			}
-			did, _ := id.DID()
 			ledger.Upsert(serviceURL, func(e *accounts.Entry) {
 				e.AgentDID = did
 				e.State = accountState
@@ -194,7 +197,7 @@ func requiresAttestation(doc *discovery.Document) bool {
 // trust.afauth.org binding, audience-bound to doc.ServiceDID. Returns
 // a friendly error pointing at `afauth trust link` when no binding
 // exists or the cached binding has expired.
-func autoAttest(ctx context.Context, doc *discovery.Document, stderr interface{ Write([]byte) (int, error) }) (string, error) {
+func autoAttest(ctx context.Context, doc *discovery.Document, activeDID string, stderr interface{ Write([]byte) (int, error) }) (string, error) {
 	st, err := loadTrustState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -204,6 +207,9 @@ func autoAttest(ctx context.Context, doc *discovery.Document, stderr interface{ 
 	}
 	if st.BindingTokenExpiresUnix > 0 && time.Now().Unix() >= st.BindingTokenExpiresUnix {
 		return "", fmt.Errorf("trust binding expired.\n  run: afauth trust link\n  then re-run this command")
+	}
+	if bindingIsOrphaned(st, activeDID) {
+		return "", fmt.Errorf("trust binding is for a different key (%s) than this agent (%s).\n  run: afauth trust link\n  then re-run this command", st.AgentDID, activeDID)
 	}
 	tok, err := trustToken(ctx, st.BaseURL, st.BindingToken, doc.ServiceDID)
 	if err != nil {

@@ -500,9 +500,10 @@ func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
 		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
 	}, "bind-tok")
 
+	did := whoamiDID(t)
 	seedTrustState(t, trustState{
 		BaseURL:                 stub.server.URL,
-		AgentDID:                "did:key:zSeeded",
+		AgentDID:                did,
 		BindingID:               "bind-1",
 		BindingToken:            "bind-tok",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),

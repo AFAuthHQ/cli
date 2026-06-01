@@ -106,6 +106,7 @@ does not specify here.
 				}
 			}
 
+			warnIfBindingStale(cmd.ErrOrStderr(), newDID)
 			fmt.Fprintf(cmd.OutOrStdout(), "rotated %s\n  old: %s\n  new: %s\n", serviceURL, oldDID, newDID)
 			return nil
 		},
@@ -189,15 +190,19 @@ overwrite an existing active key unless --force.`,
 				dest = p
 			}
 
+			// --force archives the existing key as a .bak; without it,
+			// Save refuses to overwrite.
 			if force {
-				if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("keys import: remove existing: %w", err)
+				if err := id.Replace(dest); err != nil {
+					return fmt.Errorf("keys import: %w", err)
+				}
+			} else {
+				if err := id.Save(dest); err != nil {
+					return fmt.Errorf("keys import: %w", err)
 				}
 			}
-			if err := id.Save(dest); err != nil {
-				return fmt.Errorf("keys import: %w", err)
-			}
 			did, _ := id.DID()
+			warnIfBindingStale(cmd.ErrOrStderr(), did)
 			fmt.Fprintf(cmd.OutOrStdout(), "imported %s\n%s\n", dest, did)
 			return nil
 		},
@@ -206,4 +211,3 @@ overwrite an existing active key unless --force.`,
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing destination key")
 	return cmd
 }
-

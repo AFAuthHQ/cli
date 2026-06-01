@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/afauthhq/cli/internal/identity"
 	"github.com/spf13/cobra"
@@ -31,25 +30,28 @@ mode 0600. Refuses to overwrite an existing key unless --force.`,
 				path = p
 			}
 
-			if force {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("init: remove existing key: %w", err)
-				}
-			}
-
 			id, err := identity.Generate()
 			if err != nil {
 				return err
 			}
-			if err := id.Save(path); err != nil {
-				return err
+			// --force archives any existing key as a .bak rather than
+			// destroying it; without --force, Save refuses to overwrite.
+			if force {
+				if err := id.Replace(path); err != nil {
+					return err
+				}
+			} else {
+				if err := id.Save(path); err != nil {
+					return err
+				}
 			}
 			did, _ := id.DID()
+			warnIfBindingStale(cmd.ErrOrStderr(), did)
 			fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n%s\n", path, did)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default $AFAUTH_HOME/key.json or ~/.afauth/key.json)")
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing key file")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing key (the old key is archived as a .bak)")
 	return cmd
 }

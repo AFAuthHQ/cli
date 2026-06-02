@@ -52,6 +52,8 @@ afauth status --json                     # same, machine-readable
 afauth discover https://api.example.com
 afauth call https://api.example.com/afauth/v1/accounts/me
 afauth call --method POST --data '{"x":1}' https://api.example.com/x
+# attested_only services: `call` auto-mints + retries once on a §10.7
+# attestation_required challenge; --attest <jwt> attaches one up front
 
 # Account lifecycle
 afauth signup https://api.example.com

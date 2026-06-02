@@ -213,7 +213,7 @@ func autoAttest(ctx context.Context, doc *discovery.Document, activeDID string, 
 	}
 	tok, err := trustToken(ctx, st.BaseURL, st.BindingToken, doc.ServiceDID)
 	if err != nil {
-		return "", fmt.Errorf("signup: mint attestation: %w", explainTrustError(err))
+		return "", fmt.Errorf("mint attestation: %w", explainTrustError(err))
 	}
 	cacheVerification(st, tok.Verification)
 	fmt.Fprintln(stderr, "attested via trust.afauth.org")

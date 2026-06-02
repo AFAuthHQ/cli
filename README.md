@@ -6,8 +6,9 @@ Human attention is finite. Agent attention is exploding. AFAuth is how that new 
 
 ## Status
 
-**v0.4.0** (stable). All commands functional, now including the
-AFAP-0006 `afauth trust` subcommand. Cross-language conformance gate
+**v0.5.0** (stable). All commands functional, now including `afauth status`
+(identity + attestor linkage) and §10.7 attested-session refresh in
+`afauth call --attest`. Cross-language conformance gate
 (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 Released binaries (macOS / Linux / Windows × amd64 / arm64) on the
 [releases page](https://github.com/AFAuthHQ/cli/releases).

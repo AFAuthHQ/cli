@@ -71,4 +71,3 @@ func normalizeArgs(args []string) []string {
 	}
 	return out
 }
-

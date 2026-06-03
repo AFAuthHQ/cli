@@ -57,11 +57,11 @@ func withTempHome(t *testing.T) string {
 // declared per test so each path's response shape is local to the test
 // that needs it.
 type mockService struct {
-	mu       sync.Mutex
-	calls    []*http.Request
-	bodies   map[string][]byte
-	srv      *httptest.Server
-	mux      *http.ServeMux
+	mu     sync.Mutex
+	calls  []*http.Request
+	bodies map[string][]byte
+	srv    *httptest.Server
+	mux    *http.ServeMux
 }
 
 func newMockService(t *testing.T) *mockService {
@@ -113,11 +113,11 @@ func discoveryDoc() map[string]any {
 		"service_did":          "did:web:test.example",
 		"signature_algorithms": []string{"ed25519"},
 		"endpoints": map[string]any{
-			"accounts":          "/afauth/v1/accounts",
-			"owner_invitation":  "/afauth/v1/accounts/me/owner-invitation",
-			"claim_page":        "/claim",
-			"claim_completion":  "/afauth/v1/claim",
-			"key_rotation":      "/afauth/v1/accounts/me/keys/rotate",
+			"accounts":         "/afauth/v1/accounts",
+			"owner_invitation": "/afauth/v1/accounts/me/owner-invitation",
+			"claim_page":       "/claim",
+			"claim_completion": "/afauth/v1/claim",
+			"key_rotation":     "/afauth/v1/accounts/me/keys/rotate",
 		},
 		"recipient_types": []string{"email"},
 	}
@@ -505,7 +505,6 @@ func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
 		BaseURL:                 stub.server.URL,
 		AgentDID:                did,
 		BindingID:               "bind-1",
-		BindingToken:            "bind-tok",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	})
 
@@ -568,7 +567,6 @@ func TestSignupAttestedOnlyExpiredLinkPrompts(t *testing.T) {
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zExpired",
 		BindingID:               "bind-x",
-		BindingToken:            "stale",
 		BindingTokenExpiresUnix: time.Now().Add(-time.Hour).Unix(),
 	})
 
@@ -598,7 +596,6 @@ func TestSignupOpenModeSkipsAttestation(t *testing.T) {
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zLinkedButUnused",
 		BindingID:               "bind-y",
-		BindingToken:            "tok",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	})
 
@@ -702,7 +699,7 @@ func TestAccountsShowRefresh(t *testing.T) {
 			state = "CLAIMED"
 		}
 		writeJSON(w, 200, map[string]any{
-			"state":       state,
+			"state":      state,
 			"account_id": "acct_test", "agent_did": "did:key:test",
 		})
 	})
@@ -849,9 +846,9 @@ func TestInviteRequiresService(t *testing.T) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{
-			"invitation_id":     "inv_1",
-			"claim_page_url":    "/claim/abc",
-			"expires_at":        "2099-01-01T00:00:00Z",
+			"invitation_id":  "inv_1",
+			"claim_page_url": "/claim/abc",
+			"expires_at":     "2099-01-01T00:00:00Z",
 		})
 	})
 

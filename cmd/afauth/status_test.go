@@ -88,7 +88,6 @@ func TestStatusLinkedLive(t *testing.T) {
 		BaseURL:                 "https://trust.afauth.org",
 		AgentDID:                did,
 		BindingID:               "bind-1",
-		BindingToken:            "tok",
 		BindingTokenExpiresUnix: time.Now().Add(90 * 24 * time.Hour).Unix(),
 		Verification:            "email",
 	})
@@ -126,7 +125,6 @@ func TestStatusLinkExpired(t *testing.T) {
 		BaseURL:                 "https://trust.afauth.org",
 		AgentDID:                did,
 		BindingID:               "bind-1",
-		BindingToken:            "tok",
 		BindingTokenExpiresUnix: time.Now().Add(-time.Hour).Unix(),
 	})
 	stdout, _, err := runCLI(t, "status")
@@ -150,7 +148,6 @@ func TestStatusLinkOrphaned(t *testing.T) {
 		BaseURL:                 "https://trust.afauth.org",
 		AgentDID:                "did:key:zDifferentKey",
 		BindingID:               "bind-1",
-		BindingToken:            "tok",
 		BindingTokenExpiresUnix: time.Now().Add(90 * 24 * time.Hour).Unix(),
 	})
 	stdout, _, err := runCLI(t, "status")
@@ -192,7 +189,6 @@ func TestTrustTokenCachesVerification(t *testing.T) {
 		BaseURL:                 stub.server.URL,
 		AgentDID:                did,
 		BindingID:               "bind-1",
-		BindingToken:            "bind-tok",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	})
 

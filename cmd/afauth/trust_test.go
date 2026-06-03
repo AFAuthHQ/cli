@@ -91,7 +91,6 @@ func TestTrustLink_FullFlow(t *testing.T) {
 
 	binding := trustBindingResp{
 		BindingID:             "bind-1",
-		BindingToken:          "secret-token",
 		BindingTokenExpiresAt: time.Now().Add(90 * 24 * time.Hour).Unix(),
 	}
 	stub := newStubTrust(t, 1, binding, trustTokenResp{})
@@ -144,7 +143,7 @@ func TestTrustToken_UsesPersistedBinding(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	stub := newStubTrust(t, 0,
-		trustBindingResp{BindingID: "b", BindingToken: "tok", BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix()},
+		trustBindingResp{BindingID: "b", BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix()},
 		trustTokenResp{JWT: "eyJ.HEADER.SIG", ExpiresAt: time.Now().Add(900 * time.Second).Unix(), Verification: "email"},
 	)
 
@@ -220,8 +219,8 @@ func TestTrustPoll_SignaturesValid(t *testing.T) {
 	}
 
 	var captured struct {
-		mu sync.Mutex
-		sig string
+		mu    sync.Mutex
+		sig   string
 		reqID string
 	}
 	mux := http.NewServeMux()
@@ -243,7 +242,7 @@ func TestTrustPoll_SignaturesValid(t *testing.T) {
 		}{
 			State: "confirmed",
 			trustBindingResp: trustBindingResp{
-				BindingID: "b", BindingToken: "t",
+				BindingID:             "b",
 				BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 			},
 		})
@@ -327,7 +326,7 @@ func TestTrustLink_LoopbackCallbackAccelerates(t *testing.T) {
 		}{
 			State: "confirmed",
 			trustBindingResp: trustBindingResp{
-				BindingID: "b-cb", BindingToken: "t-cb",
+				BindingID:             "b-cb",
 				BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 			},
 		})
@@ -377,7 +376,7 @@ func TestTrustLink_LoopbackUnreachable_PollRescues(t *testing.T) {
 	}
 
 	binding := trustBindingResp{
-		BindingID: "b-rescue", BindingToken: "t-rescue",
+		BindingID:             "b-rescue",
 		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
 	// confirmAfter=1: poll #1 pending, poll #2 confirmed. The stub never
@@ -438,7 +437,7 @@ func TestTrustLink_HeadlessSkipsLoopback(t *testing.T) {
 		}{
 			State: "confirmed",
 			trustBindingResp: trustBindingResp{
-				BindingID: "b-h", BindingToken: "t-h",
+				BindingID:             "b-h",
 				BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 			},
 		})
@@ -476,7 +475,7 @@ func TestTrustLink_NoLoopback_PollsAsFallback(t *testing.T) {
 	}
 
 	binding := trustBindingResp{
-		BindingID: "b", BindingToken: "t",
+		BindingID:             "b",
 		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
 	stub := newStubTrust(t, 0, binding, trustTokenResp{})
@@ -550,7 +549,7 @@ func TestTrustLink_PhasePromptOnAwaitingConfirm(t *testing.T) {
 			}{
 				State: "confirmed",
 				trustBindingResp: trustBindingResp{
-					BindingID: "b", BindingToken: "t",
+					BindingID:             "b",
 					BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 				},
 			})
@@ -639,7 +638,7 @@ func TestTrustLink_NoBrowserFlagSuppressesOpenAttempt(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	binding := trustBindingResp{
-		BindingID: "b", BindingToken: "t",
+		BindingID:             "b",
 		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
 	stub := newStubTrust(t, 0, binding, trustTokenResp{})

@@ -165,7 +165,6 @@ reached). Pass --no-loopback to force polling-only mode anywhere.
 				BaseURL:                 trustBase(base),
 				AgentDID:                did,
 				BindingID:               binding.BindingID,
-				BindingToken:            binding.BindingToken,
 				BindingTokenExpiresUnix: binding.BindingTokenExpiresAt,
 			}); err != nil {
 				return err
@@ -375,7 +374,6 @@ type trustLinkStartResp struct {
 
 type trustBindingResp struct {
 	BindingID             string `json:"binding_id"`
-	BindingToken          string `json:"binding_token"`
 	BindingTokenExpiresAt int64  `json:"binding_token_expires_at"`
 }
 
@@ -635,7 +633,6 @@ type trustState struct {
 	BaseURL                 string `json:"base_url"`
 	AgentDID                string `json:"agent_did"`
 	BindingID               string `json:"binding_id"`
-	BindingToken            string `json:"binding_token"`
 	BindingTokenExpiresUnix int64  `json:"binding_token_expires_at"`
 	// Verification is the strongest human-verification method the
 	// attestor reported at the most recent /v1/token mint (email,
@@ -726,9 +723,10 @@ func bindingIsOrphaned(st *trustState, activeDID string) bool {
 // warnIfBindingStale prints a non-fatal notice when the local trust
 // binding no longer matches the active key (after a key change), so the
 // operator knows to re-link. Deliberately NON-destructive: it does not
-// clear the binding, because the binding_token remains a live
-// attestation-minting credential at the attestor (~90 days) until
-// revoked THERE — clearing it locally would only hide that exposure.
+// clear the binding, because the binding for the previous agent key
+// remains live at the attestor (~90 days) until revoked THERE — anyone
+// still holding that key can mint with it, and clearing the local
+// pointer would only hide that exposure.
 func warnIfBindingStale(w io.Writer, activeDID string) {
 	st, err := loadTrustState()
 	if err != nil {

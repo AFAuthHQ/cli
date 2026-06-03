@@ -182,7 +182,7 @@ func attestedCall(
 	if err != nil {
 		return nil, fmt.Errorf("call: discovery for attestation refresh: %w", err)
 	}
-	jwt, err := autoAttest(ctx, doc, did, stderr)
+	jwt, err := autoAttest(ctx, doc, did, c.Identity.Seed, stderr)
 	if err != nil {
 		return nil, err
 	}

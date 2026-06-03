@@ -187,7 +187,7 @@ func TestTrustTokenCachesVerification(t *testing.T) {
 		JWT:          "header.payload.sig",
 		ExpiresAt:    time.Now().Add(15 * time.Minute).Unix(),
 		Verification: "email",
-	}, "bind-tok")
+	})
 	seedTrustState(t, trustState{
 		BaseURL:                 stub.server.URL,
 		AgentDID:                did,

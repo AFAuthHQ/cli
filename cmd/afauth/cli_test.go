@@ -498,7 +498,7 @@ func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
 	stub := newStubTrust(t, 0, trustBindingResp{}, trustTokenResp{
 		JWT:       "fake.attestation.jwt",
 		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
-	}, "bind-tok")
+	})
 
 	did := whoamiDID(t)
 	seedTrustState(t, trustState{

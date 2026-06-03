@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/afauthhq/cli/internal/signing"
 )
 
 // stubTrust is a minimal trust.afauth.org stand-in. It exposes the
@@ -25,16 +27,14 @@ type stubTrust struct {
 	confirmAfter int32 // pendings before confirming; 0 = confirm immediately
 	binding      trustBindingResp
 	tokenResp    trustTokenResp
-	wantBearer   string
 }
 
-func newStubTrust(t *testing.T, confirmAfter int32, binding trustBindingResp, tokenResp trustTokenResp, wantBearer string) *stubTrust {
+func newStubTrust(t *testing.T, confirmAfter int32, binding trustBindingResp, tokenResp trustTokenResp) *stubTrust {
 	t.Helper()
 	s := &stubTrust{
 		confirmAfter: confirmAfter,
 		binding:      binding,
 		tokenResp:    tokenResp,
-		wantBearer:   wantBearer,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/link/start", func(w http.ResponseWriter, r *http.Request) {
@@ -63,8 +63,17 @@ func newStubTrust(t *testing.T, confirmAfter int32, binding trustBindingResp, to
 		}{State: "confirmed", trustBindingResp: s.binding})
 	})
 	mux.HandleFunc("/v1/token", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("authorization"); got != "Bearer "+s.wantBearer {
-			http.Error(w, "bad bearer", 401)
+		// §3.1 keyless mint: the CLI authenticates by signing the request
+		// with its agent key (no bearer token). Verify that §5 signature
+		// the way the real attestor does, and confirm the keyid is a
+		// did:key (the agent account identifier).
+		did, err := signing.Verify(r)
+		if err != nil {
+			http.Error(w, "mint not signed by agent key: "+err.Error(), 401)
+			return
+		}
+		if !strings.HasPrefix(did, "did:key:") {
+			http.Error(w, "mint keyid is not a did:key", 401)
 			return
 		}
 		writeJSON(w, 200, s.tokenResp)
@@ -85,7 +94,7 @@ func TestTrustLink_FullFlow(t *testing.T) {
 		BindingToken:          "secret-token",
 		BindingTokenExpiresAt: time.Now().Add(90 * 24 * time.Hour).Unix(),
 	}
-	stub := newStubTrust(t, 1, binding, trustTokenResp{}, "")
+	stub := newStubTrust(t, 1, binding, trustTokenResp{})
 
 	stdout, _, err := runCLI(t, "trust", "link",
 		"--base", stub.server.URL,
@@ -137,7 +146,6 @@ func TestTrustToken_UsesPersistedBinding(t *testing.T) {
 	stub := newStubTrust(t, 0,
 		trustBindingResp{BindingID: "b", BindingToken: "tok", BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix()},
 		trustTokenResp{JWT: "eyJ.HEADER.SIG", ExpiresAt: time.Now().Add(900 * time.Second).Unix(), Verification: "email"},
-		"tok",
 	)
 
 	if _, _, err := runCLI(t, "trust", "link",
@@ -374,7 +382,7 @@ func TestTrustLink_LoopbackUnreachable_PollRescues(t *testing.T) {
 	}
 	// confirmAfter=1: poll #1 pending, poll #2 confirmed. The stub never
 	// touches the callback URL, so only polling can finish the link.
-	stub := newStubTrust(t, 1, binding, trustTokenResp{}, "")
+	stub := newStubTrust(t, 1, binding, trustTokenResp{})
 
 	stdout, _, err := runCLI(t, "trust", "link",
 		"--base", stub.server.URL,
@@ -471,7 +479,7 @@ func TestTrustLink_NoLoopback_PollsAsFallback(t *testing.T) {
 		BindingID: "b", BindingToken: "t",
 		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
-	stub := newStubTrust(t, 0, binding, trustTokenResp{}, "")
+	stub := newStubTrust(t, 0, binding, trustTokenResp{})
 
 	var capturedCallback string
 	var mu sync.Mutex
@@ -634,7 +642,7 @@ func TestTrustLink_NoBrowserFlagSuppressesOpenAttempt(t *testing.T) {
 		BindingID: "b", BindingToken: "t",
 		BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
-	stub := newStubTrust(t, 0, binding, trustTokenResp{}, "")
+	stub := newStubTrust(t, 0, binding, trustTokenResp{})
 
 	stdout, stderr, err := runCLI(t, "trust", "link",
 		"--base", stub.server.URL,

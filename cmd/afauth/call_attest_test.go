@@ -60,7 +60,7 @@ func TestCall_AttestationRefreshOnChallenge(t *testing.T) {
 	binding := trustBindingResp{BindingID: "b", BindingToken: "tok", BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix()}
 	stub := newStubTrust(t, 0, binding,
 		trustTokenResp{JWT: "att-jwt", ExpiresAt: time.Now().Add(15 * time.Minute).Unix(), Verification: "oauth"},
-		"tok")
+	)
 	if err := saveTrustState(&trustState{
 		BaseURL: stub.server.URL, AgentDID: did, BindingID: "b", BindingToken: "tok",
 		BindingTokenExpiresUnix: binding.BindingTokenExpiresAt,

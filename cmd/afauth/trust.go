@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afauthhq/cli/internal/signing"
 	"github.com/spf13/cobra"
 )
 
@@ -276,7 +277,7 @@ token and prints the resulting JWT to stdout. The JWT is short-lived
 			if bindingIsOrphaned(st, activeDID) {
 				return fmt.Errorf("trust token: binding is for %s, but the active key is %s — re-link with `afauth trust link`", st.AgentDID, activeDID)
 			}
-			tok, err := trustToken(ctx, st.BaseURL, st.BindingToken, args[0])
+			tok, err := trustToken(ctx, st.BaseURL, activeDID, id.Seed, args[0])
 			if err != nil {
 				return explainTrustError(err)
 			}
@@ -544,9 +545,28 @@ func trustPollUntilConfirmed(
 	}
 }
 
-func trustToken(ctx context.Context, base, bindingToken, aud string) (*trustTokenResp, error) {
+// trustToken mints a §10 attestation JWT for aud. §3.1 keyless mint: the
+// request is signed per §5 with the agent's account key (did + seed)
+// instead of presenting a bearer binding_token — the keypair is the sole
+// credential. The agent signs `${base}/v1/token`, which MUST match the
+// attestor's configured public base URL (the default trust.afauth.org
+// matches out of the box).
+func trustToken(ctx context.Context, base, did string, seed []byte, aud string) (*trustTokenResp, error) {
+	url := base + "/v1/token"
+	buf, err := json.Marshal(map[string]string{"aud": aud})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("content-type", "application/json")
+	if err := signing.Sign(req, did, seed, nil); err != nil {
+		return nil, fmt.Errorf("trust token: sign mint request: %w", err)
+	}
 	var out trustTokenResp
-	if err := trustPostJSON(ctx, base+"/v1/token", bindingToken, map[string]string{"aud": aud}, &out); err != nil {
+	if _, err := trustDo(req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -574,6 +594,14 @@ func trustPostJSONStatus(ctx context.Context, url, bearer string, body any, out 
 	if bearer != "" {
 		req.Header.Set("authorization", "Bearer "+bearer)
 	}
+	return trustDo(req, out)
+}
+
+// trustDo executes a prepared trust-API request and decodes the JSON
+// response, or a trustAPIError envelope on status >= 400 (status 0 on a
+// network error). Shared by the §3.1 signed mint path and the
+// bearer-authenticated link/poll calls.
+func trustDo(req *http.Request, out any) (int, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, err
@@ -584,7 +612,7 @@ func trustPostJSONStatus(ctx context.Context, url, bearer string, body any, out 
 		var env trustErrEnvelope
 		_ = json.Unmarshal(respBody, &env)
 		return resp.StatusCode, &trustAPIError{
-			URL:     url,
+			URL:     req.URL.String(),
 			Status:  resp.StatusCode,
 			Code:    env.Error.Code,
 			Message: env.Error.Message,
@@ -592,7 +620,7 @@ func trustPostJSONStatus(ctx context.Context, url, bearer string, body any, out 
 	}
 	if out != nil {
 		if err := json.Unmarshal(respBody, out); err != nil {
-			return resp.StatusCode, fmt.Errorf("trust %s: decode response: %w", url, err)
+			return resp.StatusCode, fmt.Errorf("trust %s: decode response: %w", req.URL.String(), err)
 		}
 	}
 	return resp.StatusCode, nil

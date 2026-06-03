@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afauthhq/cli/internal/httpx"
 	"github.com/afauthhq/cli/internal/identity"
 	"github.com/afauthhq/cli/internal/proto"
 	"github.com/afauthhq/cli/internal/signing"
@@ -31,11 +32,13 @@ type Client struct {
 }
 
 // New constructs a Client with the given identity and a 30-second
-// default HTTP timeout.
+// default HTTP timeout. The client refuses cross-origin redirects so a
+// signed request's `Signature`/`AFAuth-Attestation` headers can't be
+// forwarded to another origin (audit #3).
 func New(id *identity.Identity) *Client {
 	return &Client{
 		Identity: id,
-		HTTP:     &http.Client{Timeout: 30 * time.Second},
+		HTTP:     httpx.Client(30 * time.Second),
 	}
 }
 

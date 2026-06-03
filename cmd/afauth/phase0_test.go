@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,9 +49,7 @@ func TestSignupRefusesOrphanedBinding(t *testing.T) {
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	})
 	srv := newMockService(t)
-	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, attestedDiscoveryDoc())
-	})
+	serveAttestedDiscoveryDoc(srv, attestedDiscoveryDoc())
 
 	_, _, err := runCLI(t, "signup", srv.URL())
 	if err == nil {

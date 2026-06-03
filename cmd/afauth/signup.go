@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -68,7 +69,7 @@ instructions to run "afauth trust link" first.
 			// the cached trust binding. If the service doesn't require
 			// attestation, this branch is skipped (existing behaviour).
 			if attestation == "" && requiresAttestation(doc) {
-				attestation, err = autoAttest(ctx, doc, did, id.Seed, cmd.ErrOrStderr())
+				attestation, err = autoAttest(ctx, doc, serviceURL, did, id.Seed, cmd.ErrOrStderr())
 				if err != nil {
 					return err
 				}
@@ -197,7 +198,24 @@ func requiresAttestation(doc *discovery.Document) bool {
 // trust.afauth.org binding, audience-bound to doc.ServiceDID. Returns
 // a friendly error pointing at `afauth trust link` when no binding
 // exists or the cached binding has expired.
-func autoAttest(ctx context.Context, doc *discovery.Document, activeDID string, seed []byte, stderr interface{ Write([]byte) (int, error) }) (string, error) {
+func autoAttest(ctx context.Context, doc *discovery.Document, serviceURL, activeDID string, seed []byte, stderr interface{ Write([]byte) (int, error) }) (string, error) {
+	// Confused-deputy guard (audit #4): the attestation is audience-bound
+	// to doc.ServiceDID, which we read from a document served by
+	// serviceURL's host. Before minting, require a did:web service DID to
+	// be anchored at that same host — otherwise a hostile host could
+	// advertise another service's DID and harvest a token replayable
+	// against it. A non-did:web (e.g. did:key) DID has no DNS anchor; warn.
+	originHost := serviceURL
+	if u, perr := url.Parse(serviceURL); perr == nil && u.Host != "" {
+		originHost = u.Host
+	}
+	if err := discovery.VerifyServiceDIDOrigin(doc.ServiceDID, originHost); err != nil {
+		return "", err
+	}
+	if !discovery.IsDIDWeb(doc.ServiceDID) {
+		fmt.Fprintf(stderr, "warning: service_did %s is not did:web — it has no DNS/TLS anchor; minting an attestation bound to it on the trust of %s\n", doc.ServiceDID, originHost)
+	}
+
 	st, err := loadTrustState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

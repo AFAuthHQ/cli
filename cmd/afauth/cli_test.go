@@ -471,6 +471,22 @@ func attestedDiscoveryDoc() map[string]any {
 	return doc
 }
 
+// serveAttestedDiscoveryDoc registers a /.well-known/afauth handler that
+// serves `doc` with service_did pinned to the server's own host, so the
+// CLI's §12.8 did:web↔origin binding (audit #4) holds for the dynamic
+// httptest host — a real attested_only service is anchored at the host
+// that serves its discovery document.
+func serveAttestedDiscoveryDoc(srv *mockService, doc map[string]any) {
+	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, r *http.Request) {
+		d := make(map[string]any, len(doc)+1)
+		for k, v := range doc {
+			d[k] = v
+		}
+		d["service_did"] = "did:web:" + strings.ReplaceAll(r.Host, ":", "%3A")
+		writeJSON(w, http.StatusOK, d)
+	})
+}
+
 // seedTrustState writes a trust.json under $AFAUTH_HOME so that
 // signup's auto-attestation branch has a binding to consult.
 func seedTrustState(t *testing.T, st trustState) {
@@ -509,9 +525,7 @@ func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
 	})
 
 	srv := newMockService(t)
-	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, attestedDiscoveryDoc())
-	})
+	serveAttestedDiscoveryDoc(srv, attestedDiscoveryDoc())
 	srv.mux.HandleFunc("/afauth/v1/accounts/me", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"state": "UNCLAIMED"})
 	})
@@ -539,9 +553,7 @@ func TestSignupAttestedOnlyNoLinkPrompts(t *testing.T) {
 	}
 
 	srv := newMockService(t)
-	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, attestedDiscoveryDoc())
-	})
+	serveAttestedDiscoveryDoc(srv, attestedDiscoveryDoc())
 	// /accounts/me handler intentionally absent — signup should bail
 	// out before issuing any signed request.
 
@@ -571,9 +583,7 @@ func TestSignupAttestedOnlyExpiredLinkPrompts(t *testing.T) {
 	})
 
 	srv := newMockService(t)
-	srv.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, attestedDiscoveryDoc())
-	})
+	serveAttestedDiscoveryDoc(srv, attestedDiscoveryDoc())
 
 	_, _, err := runCLI(t, "signup", srv.URL())
 	if err == nil {

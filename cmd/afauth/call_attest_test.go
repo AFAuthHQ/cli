@@ -71,9 +71,7 @@ func TestCall_AttestationRefreshOnChallenge(t *testing.T) {
 	// Fake attested_only service: the business endpoint 401s until an
 	// attestation header is present (simulating a lapsed §10.7 window).
 	svc := newMockService(t)
-	svc.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, attestedServiceDoc())
-	})
+	serveAttestedDiscoveryDoc(svc, attestedServiceDoc())
 	var apiCalls atomic.Int32
 	svc.mux.HandleFunc("/api/thing", func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)
@@ -129,9 +127,7 @@ func TestCall_AttestationRefresh_TerminalOnRevokedBinding(t *testing.T) {
 	}
 
 	svc := newMockService(t)
-	svc.mux.HandleFunc("/.well-known/afauth", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, attestedServiceDoc())
-	})
+	serveAttestedDiscoveryDoc(svc, attestedServiceDoc())
 	var apiCalls atomic.Int32
 	svc.mux.HandleFunc("/api/thing", func(w http.ResponseWriter, r *http.Request) {
 		apiCalls.Add(1)

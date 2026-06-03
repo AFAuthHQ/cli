@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/afauthhq/cli/internal/httpx"
 )
 
 // Document is the v0.1 /.well-known/afauth shape (§4.3, §4.4).
@@ -141,7 +143,9 @@ func validate(d *Document) error {
 // or an explicit URL ending in /.well-known/afauth; Fetch handles both.
 func Fetch(ctx context.Context, baseURL string, hc *http.Client) (*Document, error) {
 	if hc == nil {
-		hc = &http.Client{Timeout: 10 * time.Second}
+		// Refuse cross-origin redirects: a malicious discovery host must
+		// not bounce the fetch to another origin (audit #3).
+		hc = httpx.Client(10 * time.Second)
 	}
 	u := discoveryURL(baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

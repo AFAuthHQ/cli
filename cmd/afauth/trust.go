@@ -18,9 +18,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afauthhq/cli/internal/httpx"
 	"github.com/afauthhq/cli/internal/signing"
 	"github.com/spf13/cobra"
 )
+
+// trustHTTPClient is used for all outbound trust-attestor calls. It
+// refuses cross-origin redirects so a redirect can't forward the agent's
+// signed mint request / bearer to another origin (audit #3).
+var trustHTTPClient = httpx.Client(30 * time.Second)
 
 // trust.afauth.org client commands, implementing the AFAP-0006
 // `afauth-trust` attestor flow from the agent side.
@@ -600,7 +606,7 @@ func trustPostJSONStatus(ctx context.Context, url, bearer string, body any, out 
 // network error). Shared by the §3.1 signed mint path and the
 // bearer-authenticated link/poll calls.
 func trustDo(req *http.Request, out any) (int, error) {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := trustHTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}

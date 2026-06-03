@@ -12,7 +12,7 @@ import (
 
 func newDiscoverCmd() *cobra.Command {
 	var (
-		asJSON bool
+		asJSON     bool
 		timeoutSec int
 	)
 	cmd := &cobra.Command{

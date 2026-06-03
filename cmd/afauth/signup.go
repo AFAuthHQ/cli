@@ -68,7 +68,7 @@ instructions to run "afauth trust link" first.
 			// the cached trust binding. If the service doesn't require
 			// attestation, this branch is skipped (existing behaviour).
 			if attestation == "" && requiresAttestation(doc) {
-				attestation, err = autoAttest(ctx, doc, did, cmd.ErrOrStderr())
+				attestation, err = autoAttest(ctx, doc, did, id.Seed, cmd.ErrOrStderr())
 				if err != nil {
 					return err
 				}
@@ -197,7 +197,7 @@ func requiresAttestation(doc *discovery.Document) bool {
 // trust.afauth.org binding, audience-bound to doc.ServiceDID. Returns
 // a friendly error pointing at `afauth trust link` when no binding
 // exists or the cached binding has expired.
-func autoAttest(ctx context.Context, doc *discovery.Document, activeDID string, stderr interface{ Write([]byte) (int, error) }) (string, error) {
+func autoAttest(ctx context.Context, doc *discovery.Document, activeDID string, seed []byte, stderr interface{ Write([]byte) (int, error) }) (string, error) {
 	st, err := loadTrustState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -211,7 +211,7 @@ func autoAttest(ctx context.Context, doc *discovery.Document, activeDID string, 
 	if bindingIsOrphaned(st, activeDID) {
 		return "", fmt.Errorf("trust binding is for a different key (%s) than this agent (%s).\n  run: afauth trust link\n  then re-run this command", st.AgentDID, activeDID)
 	}
-	tok, err := trustToken(ctx, st.BaseURL, st.BindingToken, doc.ServiceDID)
+	tok, err := trustToken(ctx, st.BaseURL, activeDID, seed, doc.ServiceDID)
 	if err != nil {
 		return "", fmt.Errorf("mint attestation: %w", explainTrustError(err))
 	}

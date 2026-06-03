@@ -27,7 +27,6 @@ func TestTrustTokenRefusesOrphanedBinding(t *testing.T) {
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zPreviousKey",
 		BindingID:               "bind-1",
-		BindingToken:            "tok",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	})
 	_, _, err := runCLI(t, "trust", "token", "did:web:svc.example", "--timeout", "5")
@@ -48,7 +47,6 @@ func TestSignupRefusesOrphanedBinding(t *testing.T) {
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zPreviousKey",
 		BindingID:               "bind-1",
-		BindingToken:            "tok",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	})
 	srv := newMockService(t)

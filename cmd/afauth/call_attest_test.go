@@ -57,12 +57,12 @@ func TestCall_AttestationRefreshOnChallenge(t *testing.T) {
 	}
 
 	// Fake trust attestor that mints a token for the cached binding.
-	binding := trustBindingResp{BindingID: "b", BindingToken: "tok", BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix()}
+	binding := trustBindingResp{BindingID: "b", BindingTokenExpiresAt: time.Now().Add(time.Hour).Unix()}
 	stub := newStubTrust(t, 0, binding,
 		trustTokenResp{JWT: "att-jwt", ExpiresAt: time.Now().Add(15 * time.Minute).Unix(), Verification: "oauth"},
-		"tok")
+	)
 	if err := saveTrustState(&trustState{
-		BaseURL: stub.server.URL, AgentDID: did, BindingID: "b", BindingToken: "tok",
+		BaseURL: stub.server.URL, AgentDID: did, BindingID: "b",
 		BindingTokenExpiresUnix: binding.BindingTokenExpiresAt,
 	}); err != nil {
 		t.Fatalf("save trust state: %v", err)
@@ -122,7 +122,7 @@ func TestCall_AttestationRefresh_TerminalOnRevokedBinding(t *testing.T) {
 	}))
 	t.Cleanup(trustSrv.Close)
 	if err := saveTrustState(&trustState{
-		BaseURL: trustSrv.URL, AgentDID: did, BindingID: "b", BindingToken: "tok",
+		BaseURL: trustSrv.URL, AgentDID: did, BindingID: "b",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
 	}); err != nil {
 		t.Fatalf("save trust state: %v", err)

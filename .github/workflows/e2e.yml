@@ -71,6 +71,17 @@ jobs:
           path: registry
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+      # The reference-server is built against the CURRENT SDK source
+      # (scripts/pack-sdk.sh vendors tarballs), so the harness exercises
+      # `main` rather than whatever is published to npm.
+      - name: Check out typescript-sdk
+        if: steps.cfg.outputs.skip != 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: AFAuthHQ/typescript-sdk
+          ref: main
+          path: typescript-sdk
+
       - name: Set up Go
         if: steps.cfg.outputs.skip != 'true'
         uses: actions/setup-go@v6
@@ -82,6 +93,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+
+      - name: Set up pnpm
+        if: steps.cfg.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
       - name: Build CLI under test
         if: steps.cfg.outputs.skip != 'true'
@@ -96,6 +113,7 @@ jobs:
         env:
           E2E_TRUST_DIR: ${{ github.workspace }}/trust
           E2E_REGISTRY_DIR: ${{ github.workspace }}/registry
+          E2E_SDK_DIR: ${{ github.workspace }}/typescript-sdk
           E2E_WAIT_SECONDS: '180'
         run: ./scripts/up.sh
 

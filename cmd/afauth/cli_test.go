@@ -376,7 +376,7 @@ func TestSignupImplicitWritesLedger(t *testing.T) {
 			http.Error(w, "wrong method", 405)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"state": "UNCLAIMED", "account_did": "did:key:test"})
+		writeJSON(w, 200, map[string]any{"state": "UNCLAIMED", "account_id": "acct_test", "agent_did": "did:key:test"})
 	})
 
 	stdout, _, err := runCLI(t, "signup", srv.URL())
@@ -414,7 +414,7 @@ func TestSignupExplicitWithTermsVersion(t *testing.T) {
 			http.Error(w, "method", 405)
 			return
 		}
-		writeJSON(w, 201, map[string]any{"state": "UNCLAIMED", "account_did": "did:key:test"})
+		writeJSON(w, 201, map[string]any{"state": "UNCLAIMED", "account_id": "acct_test", "agent_did": "did:key:test"})
 	})
 
 	stdout, _, err := runCLI(t, "signup", "--explicit", "--terms-version", "2026-05-01", srv.URL())
@@ -703,7 +703,7 @@ func TestAccountsShowRefresh(t *testing.T) {
 		}
 		writeJSON(w, 200, map[string]any{
 			"state":       state,
-			"account_did": "did:key:test",
+			"account_id": "acct_test", "agent_did": "did:key:test",
 		})
 	})
 

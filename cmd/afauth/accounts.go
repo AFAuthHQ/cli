@@ -134,9 +134,10 @@ func refreshAccount(parentCtx context.Context, serviceURL, keyPath string, ledge
 		return fmt.Errorf("accounts: GET %s returned %d", url, resp.HTTPResponse.StatusCode)
 	}
 	var body struct {
-		AccountDID string          `json:"account_did"`
-		State      string          `json:"state"`
-		Owner      json.RawMessage `json:"owner"`
+		AccountID string          `json:"account_id"`
+		AgentDID  string          `json:"agent_did"`
+		State     string          `json:"state"`
+		Owner     json.RawMessage `json:"owner"`
 	}
 	if err := json.Unmarshal(resp.Body, &body); err != nil {
 		return fmt.Errorf("accounts: parse /accounts/me: %w", err)
@@ -144,6 +145,7 @@ func refreshAccount(parentCtx context.Context, serviceURL, keyPath string, ledge
 	did, _ := id.DID()
 	ledger.Upsert(serviceURL, func(e *accounts.Entry) {
 		e.AgentDID = did
+		e.AccountID = body.AccountID
 		e.State = body.State
 		if len(body.Owner) > 0 && string(body.Owner) != "null" {
 			var owner accounts.Owner

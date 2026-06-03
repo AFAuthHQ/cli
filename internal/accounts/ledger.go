@@ -25,6 +25,9 @@ type Entry struct {
 	ServiceURL string `json:"service_url"`
 	// AgentDID is the agent's did:key at the time of this entry.
 	AgentDID string `json:"agent_did"`
+	// AccountID is the service's opaque account identifier (§6.0). One
+	// account may group several of the human's agent DIDs (devices).
+	AccountID string `json:"account_id,omitempty"`
 	// State is the last observed account state (UNCLAIMED, INVITED, CLAIMED, …).
 	State string `json:"state,omitempty"`
 	// CreatedAt is the timestamp this entry was first written.

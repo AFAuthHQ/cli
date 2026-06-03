@@ -6,9 +6,11 @@ Human attention is finite. Agent attention is exploding. AFAuth is how that new 
 
 ## Status
 
-**v0.5.0** (stable). All commands functional, now including `afauth status`
-(identity + attestor linkage) and §10.7 attested-session refresh in
-`afauth call --attest`. Cross-language conformance gate
+**v0.6.0** (stable). Keyless trust mint (§3.1): `afauth trust token` and
+the auto-attest paths now sign the `/v1/token` mint with the agent key —
+no bearer `binding_token` is stored. All commands functional, including
+`afauth status` (identity + attestor linkage) and §10.7 attested-session
+refresh in `afauth call --attest`. Cross-language conformance gate
 (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 Released binaries (macOS / Linux / Windows × amd64 / arm64) on the
 [releases page](https://github.com/AFAuthHQ/cli/releases).

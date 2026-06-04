@@ -287,6 +287,7 @@ token and prints the resulting JWT to stdout. The JWT is short-lived
 				return explainTrustError(err)
 			}
 			cacheVerification(st, tok.Verification)
+			cacheBindingExpiry(st, tok.BindingExpiresUnix)
 			fmt.Fprintln(cmd.OutOrStdout(), tok.JWT)
 			return nil
 		},
@@ -387,6 +388,12 @@ type trustTokenResp struct {
 	JWT          string `json:"jwt"`
 	ExpiresAt    int64  `json:"expires_at"`
 	Verification string `json:"verification"`
+	// BindingExpiresUnix is when the binding lapses if left unused. The
+	// attestor re-arms it on every mint (inactivity window); the CLI
+	// refreshes its cached copy from this so `afauth status` and the
+	// signup pre-check don't treat the link-time deadline as fixed.
+	// Absent (0) from older attestors.
+	BindingExpiresUnix int64 `json:"binding_expires_at"`
 }
 
 type trustErrEnvelope struct {
@@ -635,11 +642,15 @@ func trustDo(req *http.Request, out any) (int, error) {
 // ---------------------------------------------------------------------
 
 type trustState struct {
-	Version                 int    `json:"version"`
-	BaseURL                 string `json:"base_url"`
-	AgentDID                string `json:"agent_did"`
-	BindingID               string `json:"binding_id"`
-	BindingTokenExpiresUnix int64  `json:"binding_token_expires_at"`
+	Version   int    `json:"version"`
+	BaseURL   string `json:"base_url"`
+	AgentDID  string `json:"agent_did"`
+	BindingID string `json:"binding_id"`
+	// BindingTokenExpiresUnix is when the binding lapses if left unused.
+	// The attestor slides it forward on every mint (inactivity window);
+	// cacheBindingExpiry refreshes this from the mint response so it
+	// tracks the live expiry rather than the link-time deadline.
+	BindingTokenExpiresUnix int64 `json:"binding_token_expires_at"`
 	// Verification is the strongest human-verification method the
 	// attestor reported at the most recent /v1/token mint (email,
 	// oauth, payment). Cached so `afauth status` can show how the agent
@@ -712,6 +723,21 @@ func cacheVerification(st *trustState, verification string) {
 	}
 	st.Verification = verification
 	st.VerificationSeenUnix = time.Now().Unix()
+	_ = saveTrustState(st)
+}
+
+// cacheBindingExpiry records the binding expiry the attestor reported at
+// the most recent /v1/token mint. The attestor slides this forward on
+// every mint (inactivity window), so refreshing the cached copy keeps
+// `afauth status` and the signup pre-check from treating the link-time
+// deadline as fixed. Throttled to ≥1h of advance so an actively-minting
+// agent doesn't rewrite trust.json on every call. Best-effort: a
+// persistence failure must never fail a mint that already succeeded.
+func cacheBindingExpiry(st *trustState, expiresUnix int64) {
+	if st == nil || expiresUnix <= 0 || expiresUnix <= st.BindingTokenExpiresUnix+3600 {
+		return
+	}
+	st.BindingTokenExpiresUnix = expiresUnix
 	_ = saveTrustState(st)
 }
 

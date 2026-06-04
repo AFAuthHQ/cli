@@ -80,22 +80,28 @@ afauth keys import backup.json
 
 # Trust attestor (AFAP-0006) — bind to a human account, mint §10 JWTs
 afauth trust link                                # browse to trust.afauth.org, confirm
-afauth signup https://tavily.com                 # auto-mints attestation when the
-                                                 # service declares attested_only;
-                                                 # exits with `afauth trust link`
-                                                 # prompt if no binding exists.
+afauth trust link --base https://acme-trust.com  # link a DIFFERENT / self-hosted attestor
+afauth signup https://tavily.com                 # auto-mints attestation when the service
+                                                 # declares attested_only, picking the
+                                                 # attestor the service accepts; exits with
+                                                 # an `afauth trust link` prompt if none —
+                                                 # or, if you're linked to an attestor the
+                                                 # service doesn't accept, names which ones
+                                                 # it does so you can re-link.
+afauth signup --attestor acme-trust https://…    # force a specific linked attestor
 afauth trust token did:web:tavily.com            # mint an audience-bound JWT manually
-afauth signup --attest "$(afauth trust token did:web:tavily.com)" \
-              https://tavily.com                 # override the auto-mint (testing)
-afauth trust status                              # show the cached binding
-afauth trust forget                              # delete the local binding
+afauth trust token --attestor acme-trust did:web:…  # …from a specific attestor
+afauth trust status                              # show the cached binding(s)
+afauth trust forget [--attestor <iss|url>]       # delete one (or all) local bindings
 ```
 
 `~/.afauth/key.json` is the active keypair (mode 0600).
 `~/.afauth/accounts.json` is a local ledger of services this agent has
 used; the service remains authoritative. `~/.afauth/trust.json` (mode
-0600) holds the trust-attestor binding token if you ran
-`afauth trust link`. `$AFAUTH_HOME` overrides all three locations.
+0600) holds your trust-attestor binding(s) — an agent can link to more
+than one attestor, and `signup`/`call` pick the one a service accepts
+(its `billing.accepted_attestors`), or `--attestor` chooses explicitly.
+`$AFAUTH_HOME` overrides all three locations.
 
 ## Develop
 

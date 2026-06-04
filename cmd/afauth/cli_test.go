@@ -487,15 +487,20 @@ func serveAttestedDiscoveryDoc(srv *mockService, doc map[string]any) {
 	})
 }
 
-// seedTrustState writes a trust.json under $AFAUTH_HOME so that
-// signup's auto-attestation branch has a binding to consult.
-func seedTrustState(t *testing.T, st trustState) {
+// seedTrustState writes a trust.json under $AFAUTH_HOME so that the
+// signup/token paths have binding(s) to consult. Accepts one or more
+// bindings to exercise multi-attestor selection.
+func seedTrustState(t *testing.T, bindings ...trustBinding) {
 	t.Helper()
 	path, err := trustStatePath()
 	if err != nil {
 		t.Fatalf("trust state path: %v", err)
 	}
-	if err := saveTrustState(&st); err != nil {
+	st := newTrustState()
+	for i := range bindings {
+		st.Bindings = append(st.Bindings, &bindings[i])
+	}
+	if err := saveTrustState(st); err != nil {
 		t.Fatalf("seed trust state: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -517,7 +522,7 @@ func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
 	})
 
 	did := whoamiDID(t)
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 stub.server.URL,
 		AgentDID:                did,
 		BindingID:               "bind-1",
@@ -534,8 +539,12 @@ func TestSignupAttestedOnlyAutoFetchesAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
-	if !strings.Contains(stderr, "attested via trust.afauth.org") {
-		t.Fatalf("stderr missing attestation breadcrumb: %q", stderr)
+	// #2: the breadcrumb must name the ACTUAL attestor, not a hardcoded
+	// "trust.afauth.org". With no learnable iss from the stub, it falls
+	// back to the attestor's host.
+	stubHost := strings.TrimPrefix(stub.server.URL, "http://")
+	if !strings.Contains(stderr, "attested via "+stubHost) {
+		t.Fatalf("stderr should report the actual attestor host %q, got: %q", stubHost, stderr)
 	}
 	call := srv.lastCall("GET", "/afauth/v1/accounts/me")
 	if call == nil {
@@ -575,7 +584,7 @@ func TestSignupAttestedOnlyExpiredLinkPrompts(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zExpired",
 		BindingID:               "bind-x",
@@ -602,7 +611,7 @@ func TestSignupOpenModeSkipsAttestation(t *testing.T) {
 
 	// Open service (no billing block at all). Even if a trust binding
 	// exists, the CLI must NOT mint an attestation.
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zLinkedButUnused",
 		BindingID:               "bind-y",

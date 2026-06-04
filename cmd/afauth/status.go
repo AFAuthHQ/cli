@@ -154,35 +154,47 @@ func gatherStatus(keyPath string) (*statusInfo, error) {
 // reported as unlinked rather than failing the command.
 func loadLinkSummary(activeDID string) *linkSummary {
 	st, err := loadTrustState()
-	if err != nil {
+	if err != nil || len(st.Bindings) == 0 {
 		return &linkSummary{Linked: false, State: "unlinked"}
 	}
+	b := primaryBinding(st, activeDID)
 	ls := &linkSummary{
 		Linked:           true,
-		Attestor:         st.BaseURL,
-		BindingID:        st.BindingID,
-		MatchesActiveKey: st.AgentDID == activeDID,
-		Verification:     st.Verification,
-		State:            linkState(st, activeDID),
+		Attestor:         b.BaseURL,
+		BindingID:        b.BindingID,
+		MatchesActiveKey: b.AgentDID == activeDID,
+		Verification:     b.Verification,
+		State:            linkState(b, activeDID),
 	}
-	if st.BindingTokenExpiresUnix > 0 {
-		ls.ExpiresAt = time.Unix(st.BindingTokenExpiresUnix, 0).UTC().Format(time.RFC3339)
+	if b.BindingTokenExpiresUnix > 0 {
+		ls.ExpiresAt = time.Unix(b.BindingTokenExpiresUnix, 0).UTC().Format(time.RFC3339)
 	}
-	if st.VerificationSeenUnix > 0 {
-		ls.VerificationSeenAt = time.Unix(st.VerificationSeenUnix, 0).UTC().Format(time.RFC3339)
+	if b.VerificationSeenUnix > 0 {
+		ls.VerificationSeenAt = time.Unix(b.VerificationSeenUnix, 0).UTC().Format(time.RFC3339)
 	}
 	return ls
+}
+
+// primaryBinding picks the binding `afauth status` summarizes when several
+// exist: the first usable one (live, matches the active key), else the
+// first binding so a stale/orphaned link is still surfaced. `afauth trust
+// status` lists them all.
+func primaryBinding(st *trustState, activeDID string) *trustBinding {
+	if usable := st.usable(activeDID); len(usable) > 0 {
+		return usable[0]
+	}
+	return st.Bindings[0]
 }
 
 // linkState classifies a binding. Orphaned (bound to a different key,
 // e.g. after a rotation that left trust.json behind) takes priority over
 // expiry, since the binding is unusable by the active key regardless.
-func linkState(st *trustState, activeDID string) string {
-	if bindingIsOrphaned(st, activeDID) {
+func linkState(b *trustBinding, activeDID string) string {
+	if bindingIsOrphaned(b, activeDID) {
 		return "orphaned"
 	}
-	if st.BindingTokenExpiresUnix > 0 {
-		exp := time.Unix(st.BindingTokenExpiresUnix, 0)
+	if b.BindingTokenExpiresUnix > 0 {
+		exp := time.Unix(b.BindingTokenExpiresUnix, 0)
 		now := time.Now()
 		if now.After(exp) {
 			return "expired"

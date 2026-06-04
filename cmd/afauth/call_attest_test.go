@@ -61,10 +61,10 @@ func TestCall_AttestationRefreshOnChallenge(t *testing.T) {
 	stub := newStubTrust(t, 0, binding,
 		trustTokenResp{JWT: "att-jwt", ExpiresAt: time.Now().Add(15 * time.Minute).Unix(), Verification: "oauth"},
 	)
-	if err := saveTrustState(&trustState{
+	if err := saveTrustState(newTrustState(&trustBinding{
 		BaseURL: stub.server.URL, AgentDID: did, BindingID: "b",
 		BindingTokenExpiresUnix: binding.BindingTokenExpiresAt,
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("save trust state: %v", err)
 	}
 
@@ -119,10 +119,10 @@ func TestCall_AttestationRefresh_TerminalOnRevokedBinding(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 	t.Cleanup(trustSrv.Close)
-	if err := saveTrustState(&trustState{
+	if err := saveTrustState(newTrustState(&trustBinding{
 		BaseURL: trustSrv.URL, AgentDID: did, BindingID: "b",
 		BindingTokenExpiresUnix: time.Now().Add(time.Hour).Unix(),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("save trust state: %v", err)
 	}
 

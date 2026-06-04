@@ -22,7 +22,7 @@ func TestTrustTokenRefusesOrphanedBinding(t *testing.T) {
 	}
 	// A binding for a different key — e.g. left behind by a rotation.
 	// The guard must fire before any network call, so no stub is needed.
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zPreviousKey",
 		BindingID:               "bind-1",
@@ -42,7 +42,7 @@ func TestSignupRefusesOrphanedBinding(t *testing.T) {
 	if _, _, err := runCLI(t, "init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.example",
 		AgentDID:                "did:key:zPreviousKey",
 		BindingID:               "bind-1",

@@ -84,7 +84,7 @@ func TestStatusLinkedLive(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	did := whoamiDID(t)
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.afauth.org",
 		AgentDID:                did,
 		BindingID:               "bind-1",
@@ -121,7 +121,7 @@ func TestStatusLinkExpired(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	did := whoamiDID(t)
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.afauth.org",
 		AgentDID:                did,
 		BindingID:               "bind-1",
@@ -144,7 +144,7 @@ func TestStatusLinkOrphaned(t *testing.T) {
 	// Binding belongs to a different key — e.g. after a key rotation
 	// that left trust.json behind. status must catch this rather than
 	// reporting the agent as linked.
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 "https://trust.afauth.org",
 		AgentDID:                "did:key:zDifferentKey",
 		BindingID:               "bind-1",
@@ -185,7 +185,7 @@ func TestTrustTokenCachesVerification(t *testing.T) {
 		ExpiresAt:    time.Now().Add(15 * time.Minute).Unix(),
 		Verification: "email",
 	})
-	seedTrustState(t, trustState{
+	seedTrustState(t, trustBinding{
 		BaseURL:                 stub.server.URL,
 		AgentDID:                did,
 		BindingID:               "bind-1",
@@ -200,10 +200,14 @@ func TestTrustTokenCachesVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadTrustState: %v", err)
 	}
-	if st.Verification != "email" {
-		t.Fatalf("want cached verification 'email', got %q", st.Verification)
+	if len(st.Bindings) != 1 {
+		t.Fatalf("want exactly 1 binding, got %d", len(st.Bindings))
 	}
-	if st.VerificationSeenUnix == 0 {
+	b := st.Bindings[0]
+	if b.Verification != "email" {
+		t.Fatalf("want cached verification 'email', got %q", b.Verification)
+	}
+	if b.VerificationSeenUnix == 0 {
 		t.Fatalf("want verification_seen_at set")
 	}
 

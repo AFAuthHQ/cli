@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/afauthhq/cli/internal/accounts"
@@ -23,6 +24,7 @@ func newSignupCmd() *cobra.Command {
 		explicit     bool
 		termsVersion string
 		attestation  string
+		attestor     string
 		timeoutSec   int
 	)
 	cmd := &cobra.Command{
@@ -69,7 +71,7 @@ instructions to run "afauth trust link" first.
 			// the cached trust binding. If the service doesn't require
 			// attestation, this branch is skipped (existing behaviour).
 			if attestation == "" && requiresAttestation(doc) {
-				attestation, err = autoAttest(ctx, doc, serviceURL, did, id.Seed, cmd.ErrOrStderr())
+				attestation, err = autoAttest(ctx, doc, serviceURL, did, id.Seed, attestorOverride(attestor), cmd.ErrOrStderr())
 				if err != nil {
 					return err
 				}
@@ -112,6 +114,7 @@ instructions to run "afauth trust link" first.
 	cmd.Flags().BoolVar(&explicit, "explicit", false, "use the §6.4 POST /accounts flow instead of implicit signup")
 	cmd.Flags().StringVar(&termsVersion, "terms-version", "", "terms version to send with explicit signup")
 	cmd.Flags().StringVar(&attestation, "attest", "", "AFAuth-Attestation JWT (overrides the auto-mint from `afauth trust link`)")
+	cmd.Flags().StringVar(&attestor, "attestor", "", "which linked attestor to mint from (iss or base URL); default: the one this service accepts")
 	cmd.Flags().IntVar(&timeoutSec, "timeout", 30, "request timeout in seconds")
 	return cmd
 }
@@ -194,11 +197,17 @@ func requiresAttestation(doc *discovery.Document) bool {
 	return doc != nil && doc.Billing != nil && doc.Billing.UnclaimedMode == "attested_only"
 }
 
-// autoAttest mints a fresh §10 attestation JWT from the cached
-// trust.afauth.org binding, audience-bound to doc.ServiceDID. Returns
-// a friendly error pointing at `afauth trust link` when no binding
-// exists or the cached binding has expired.
-func autoAttest(ctx context.Context, doc *discovery.Document, serviceURL, activeDID string, seed []byte, stderr interface{ Write([]byte) (int, error) }) (string, error) {
+// autoAttest mints a fresh §10 attestation JWT from a linked trust
+// binding, audience-bound to doc.ServiceDID, and returns it.
+//
+// It picks the binding the service accepts: when the discovery doc's
+// §4.4 billing.accepted_attestors names attestors, the binding whose iss
+// is on that list is used; override forces a specific one. When the
+// chosen attestor isn't accepted, autoAttest fails with an actionable
+// error BEFORE sending anything to the service (#1), rather than letting
+// the service reject an unrecognized token. Returns a friendly error
+// pointing at `afauth trust link` when no usable binding exists.
+func autoAttest(ctx context.Context, doc *discovery.Document, serviceURL, activeDID string, seed []byte, override string, stderr interface{ Write([]byte) (int, error) }) (string, error) {
 	// Confused-deputy guard (audit #4): the attestation is audience-bound
 	// to doc.ServiceDID, which we read from a document served by
 	// serviceURL's host. Before minting, require a did:web service DID to
@@ -219,22 +228,43 @@ func autoAttest(ctx context.Context, doc *discovery.Document, serviceURL, active
 	st, err := loadTrustState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("service requires a trust attestation, but no agent is linked.\n  run: afauth trust link\n  then re-run this command")
+			return "", errNotLinkedForService()
 		}
 		return "", fmt.Errorf("signup: load trust binding: %w", err)
 	}
-	if st.BindingTokenExpiresUnix > 0 && time.Now().Unix() >= st.BindingTokenExpiresUnix {
-		return "", fmt.Errorf("trust binding expired.\n  run: afauth trust link\n  then re-run this command")
+	if len(st.Bindings) == 0 {
+		return "", errNotLinkedForService()
 	}
-	if bindingIsOrphaned(st, activeDID) {
-		return "", fmt.Errorf("trust binding is for a different key (%s) than this agent (%s).\n  run: afauth trust link\n  then re-run this command", st.AgentDID, activeDID)
+
+	var accepted []string
+	if doc.Billing != nil {
+		accepted = doc.Billing.AcceptedAttestors
 	}
-	tok, err := trustToken(ctx, st.BaseURL, activeDID, seed, doc.ServiceDID)
+	b, err := selectAttestorBinding(st, accepted, override, activeDID)
+	if err != nil {
+		return "", err
+	}
+	tok, err := trustToken(ctx, b.BaseURL, activeDID, seed, doc.ServiceDID)
 	if err != nil {
 		return "", fmt.Errorf("mint attestation: %w", explainTrustError(err))
 	}
-	cacheVerification(st, tok.Verification)
-	cacheBindingExpiry(st, tok.BindingExpiresUnix)
-	fmt.Fprintln(stderr, "attested via trust.afauth.org")
+	// Learn the attestor's iss from the freshly minted token (#5), then —
+	// now that it's known — reconcile against the service's accepted list
+	// before sending (#1). This catches the optimistic single-binding case
+	// where the iss wasn't cached at selection time, turning what would be
+	// an opaque server rejection into a local, actionable error.
+	learnIss(st, b, tok.JWT)
+	if len(accepted) > 0 && b.Iss != "" && !slices.Contains(accepted, b.Iss) {
+		return "", notAcceptedErr(accepted, []*trustBinding{b})
+	}
+	cacheVerification(st, b, tok.Verification)
+	cacheBindingExpiry(st, b, tok.BindingExpiresUnix)
+	fmt.Fprintf(stderr, "attested via %s\n", attestorLabel(b))
 	return tok.JWT, nil
+}
+
+// errNotLinkedForService is the not-linked error in the signup/call
+// context: a service requires an attestation but the agent has no binding.
+func errNotLinkedForService() error {
+	return fmt.Errorf("service requires a trust attestation, but no agent is linked.\n  run: afauth trust link\n  then re-run this command")
 }

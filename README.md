@@ -6,11 +6,15 @@ Human attention is finite. Agent attention is exploding. AFAuth is how that new 
 
 ## Status
 
-**v0.6.0** (stable). Keyless trust mint (§3.1): `afauth trust token` and
-the auto-attest paths now sign the `/v1/token` mint with the agent key —
-no bearer `binding_token` is stored. All commands functional, including
-`afauth status` (identity + attestor linkage) and §10.7 attested-session
-refresh in `afauth call --attest`. Cross-language conformance gate
+**v0.6.1** (stable). Security hardening: the signed-request, discovery,
+and trust-attestor clients now refuse cross-origin redirects — a 30x can
+no longer harvest a live `AFAuth-Attestation` JWT or `Signature` header —
+and auto-attest binds the attestation audience to the discovery origin, so
+a `did:web` service DID MUST be anchored at the host that served its
+discovery document before a token is minted (confused-deputy guard). All
+commands functional, including keyless trust mint (§3.1), `afauth status`
+(identity + attestor linkage), and §10.7 attested-session refresh in
+`afauth call --attest`. Cross-language conformance gate
 (`testdata/spec-vectors/`) green against `AFAuthHQ/spec @ 908892a`.
 Released binaries (macOS / Linux / Windows × amd64 / arm64) on the
 [releases page](https://github.com/AFAuthHQ/cli/releases).

@@ -694,3 +694,31 @@ func mustHex(t *testing.T, s string) []byte {
 	}
 	return b
 }
+
+// TestCacheBindingExpiry pins the sliding-window refresh throttle: the
+// attestor re-arms the binding expiry on every mint, but the CLI only
+// rewrites trust.json once the cached value would advance by >1h, and an
+// absent (0) value from an older attestor is a no-op.
+func TestCacheBindingExpiry(t *testing.T) {
+	t.Setenv("AFAUTH_HOME", t.TempDir()) // best-effort save lands in temp
+
+	st := &trustState{BindingTokenExpiresUnix: 1_000_000}
+
+	// Sub-hour advance: throttled, cached value unchanged.
+	cacheBindingExpiry(st, 1_000_000+1800)
+	if st.BindingTokenExpiresUnix != 1_000_000 {
+		t.Fatalf("sub-hour advance should be throttled, got %d", st.BindingTokenExpiresUnix)
+	}
+
+	// >1h advance: refreshed.
+	cacheBindingExpiry(st, 1_000_000+7200)
+	if st.BindingTokenExpiresUnix != 1_000_000+7200 {
+		t.Fatalf("over-hour advance should refresh, got %d", st.BindingTokenExpiresUnix)
+	}
+
+	// Absent field (older attestor): no-op, never writes a non-positive expiry.
+	cacheBindingExpiry(st, 0)
+	if st.BindingTokenExpiresUnix != 1_000_000+7200 {
+		t.Fatalf("zero expiry should be a no-op, got %d", st.BindingTokenExpiresUnix)
+	}
+}

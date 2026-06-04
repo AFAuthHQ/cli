@@ -234,6 +234,7 @@ func autoAttest(ctx context.Context, doc *discovery.Document, serviceURL, active
 		return "", fmt.Errorf("mint attestation: %w", explainTrustError(err))
 	}
 	cacheVerification(st, tok.Verification)
+	cacheBindingExpiry(st, tok.BindingExpiresUnix)
 	fmt.Fprintln(stderr, "attested via trust.afauth.org")
 	return tok.JWT, nil
 }

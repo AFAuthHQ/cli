@@ -170,14 +170,19 @@ func attestedCall(
 	if err != nil {
 		return nil, err
 	}
-	if resp.Err == nil || resp.Err.Code != proto.ErrAttestationRequired {
+	if !attestationRequired(resp) {
 		return resp, nil
 	}
 
 	// §10.7 challenge: the attested session lapsed. Discover the
 	// service's DID (the attestation audience), mint a fresh
-	// attestation from the cached trust binding, and retry once.
-	fmt.Fprintln(stderr, "attestation_required — minting a fresh attestation and retrying (§10.7)")
+	// attestation from the cached trust binding, and retry once. If the
+	// §5.7 challenge named the accepted attestors, surface them.
+	if ch := proto.ParseChallenge(resp.HTTPResponse.Header.Get("WWW-Authenticate")); ch != nil && len(ch.Attestors) > 0 {
+		fmt.Fprintf(stderr, "attestation_required — service accepts %s; minting a fresh attestation and retrying (§10.7)\n", strings.Join(ch.Attestors, ", "))
+	} else {
+		fmt.Fprintln(stderr, "attestation_required — minting a fresh attestation and retrying (§10.7)")
+	}
 	doc, err := discovery.Fetch(ctx, serviceOrigin(serviceURL), nil)
 	if err != nil {
 		return nil, fmt.Errorf("call: discovery for attestation refresh: %w", err)
@@ -192,6 +197,19 @@ func attestedCall(
 	}
 	req2.Header.Set("AFAuth-Attestation", jwt)
 	return c.Do(ctx, req2)
+}
+
+// attestationRequired reports whether resp is an `attestation_required`
+// challenge. It prefers the §5.7 `WWW-Authenticate` header (robust even when the
+// body is missing or not JSON) and falls back to the §11.1 error envelope for
+// services that predate the challenge.
+func attestationRequired(resp *client.Response) bool {
+	if resp.HTTPResponse != nil && resp.HTTPResponse.StatusCode == http.StatusUnauthorized {
+		if ch := proto.ParseChallenge(resp.HTTPResponse.Header.Get("WWW-Authenticate")); ch != nil && ch.Error != "" {
+			return ch.Error == proto.ErrAttestationRequired
+		}
+	}
+	return resp.Err != nil && resp.Err.Code == proto.ErrAttestationRequired
 }
 
 // serviceOrigin reduces a request URL to scheme://host so discovery can

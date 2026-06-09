@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/afauthhq/cli/internal/accounts"
@@ -19,7 +20,13 @@ func newKeysCmd() *cobra.Command {
 		Use:   "keys",
 		Short: "Manage agent keypairs",
 	}
-	cmd.AddCommand(newKeysRotateCmd(), newKeysExportCmd(), newKeysImportCmd())
+	cmd.AddCommand(
+		newKeysRotateCmd(),
+		newKeysExportCmd(),
+		newKeysImportCmd(),
+		newKeysBackupsCmd(),
+		newKeysForgetBackupCmd(),
+	)
 	return cmd
 }
 
@@ -58,12 +65,14 @@ does not specify here.
 			if err != nil {
 				return err
 			}
+			defer id.Destroy() // zero the old seed once the command returns
 			oldDID, _ := id.DID()
 
 			newID, err := identity.Generate()
 			if err != nil {
 				return fmt.Errorf("keys rotate: generate new key: %w", err)
 			}
+			defer newID.Destroy()
 			newDID, _ := newID.DID()
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), time.Duration(timeoutSec)*time.Second)
@@ -91,7 +100,8 @@ does not specify here.
 				return fmt.Errorf("keys rotate: %s returned %d: %s", url, resp.HTTPResponse.StatusCode, string(resp.Body))
 			}
 
-			if err := newID.Replace(path); err != nil {
+			backup, err := newID.Replace(path)
+			if err != nil {
 				return fmt.Errorf("keys rotate: install new key (service rotated; please recover from %s.<unix>.bak): %w", path, err)
 			}
 
@@ -108,6 +118,13 @@ does not specify here.
 
 			warnIfBindingStale(cmd.ErrOrStderr(), newDID)
 			fmt.Fprintf(cmd.OutOrStdout(), "rotated %s\n  old: %s\n  new: %s\n", serviceURL, oldDID, newDID)
+			if backup != "" {
+				// The backup exists only to recover from a rotation the
+				// service later disputes; once it confirms the new key, the
+				// backup is a live private key with no further use. Tie its
+				// lifetime to that confirmation window.
+				fmt.Fprintf(cmd.OutOrStdout(), "  old key archived at %s\n  once the service confirms the new key, shred the backup:\n    afauth keys forget-backup %s\n", backup, backup)
+			}
 			return nil
 		},
 	}
@@ -180,6 +197,7 @@ overwrite an existing active key unless --force.`,
 			if err != nil {
 				return fmt.Errorf("keys import: %w", err)
 			}
+			defer id.Destroy() // zero the imported seed once the command returns
 
 			dest := keyPath
 			if dest == "" {
@@ -193,7 +211,7 @@ overwrite an existing active key unless --force.`,
 			// --force archives the existing key as a .bak; without it,
 			// Save refuses to overwrite.
 			if force {
-				if err := id.Replace(dest); err != nil {
+				if _, err := id.Replace(dest); err != nil {
 					return fmt.Errorf("keys import: %w", err)
 				}
 			} else {
@@ -209,5 +227,127 @@ overwrite an existing active key unless --force.`,
 	}
 	cmd.Flags().StringVar(&keyPath, "key", "", "destination key path (default ~/.afauth/key.json)")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing destination key")
+	return cmd
+}
+
+func newKeysBackupsCmd() *cobra.Command {
+	var keyPath string
+	cmd := &cobra.Command{
+		Use:   "backups",
+		Short: "List archived key backups sitting next to the active key",
+		Long: `Lists the archived key backups alongside the active key. Each backup
+holds a complete private key (the raw Ed25519 seed): rotation and
+'keys import --force' preserve the old key here so you can recover from
+a swap the service later disputes.
+
+Backups accumulate with no automatic pruning, so a long-lived agent ends
+up with a pile of live private keys on disk. Once a rotation is
+confirmed, shred the stale backup with 'afauth keys forget-backup'.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := keyPath
+			if path == "" {
+				p, err := identity.DefaultPath()
+				if err != nil {
+					return err
+				}
+				path = p
+			}
+			backups, err := identity.Backups(path)
+			if err != nil {
+				return err
+			}
+			if len(backups) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no key backups found")
+				return nil
+			}
+			for _, b := range backups {
+				line := b
+				if id, err := identity.Load(b); err == nil {
+					if did, err := id.DID(); err == nil {
+						line = fmt.Sprintf("%s  %s", b, did)
+					}
+					id.Destroy()
+				} else {
+					line = fmt.Sprintf("%s  (unreadable: %v)", b, err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), line)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default ~/.afauth/key.json)")
+	return cmd
+}
+
+func newKeysForgetBackupCmd() *cobra.Command {
+	var (
+		keyPath string
+		shred   bool
+		all     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "forget-backup [path...]",
+		Short: "Shred and remove archived key backups",
+		Long: `Securely removes one or more key backups. By default each file's
+bytes are overwritten with zeros before it is unlinked (--shred, on by
+default); pass --shred=false for a plain unlink.
+
+Give explicit backup paths (see 'afauth keys backups'), or --all to
+remove every backup of the active key. Refuses to touch anything that is
+not a *.bak file, so the active key can't be shredded by mistake.
+
+Shredding is best-effort: on SSD/copy-on-write filesystems the overwrite
+may not land on the original blocks. Full-disk encryption is the real
+backstop.
+
+  afauth keys forget-backup ~/.afauth/key.json.1700000000.bak
+  afauth keys forget-backup --all`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := keyPath
+			if path == "" {
+				p, err := identity.DefaultPath()
+				if err != nil {
+					return err
+				}
+				path = p
+			}
+
+			targets := append([]string{}, args...)
+			if all {
+				backups, err := identity.Backups(path)
+				if err != nil {
+					return err
+				}
+				targets = append(targets, backups...)
+			}
+			if len(targets) == 0 {
+				return fmt.Errorf("keys forget-backup: pass a backup path or --all")
+			}
+			// Validate everything before removing anything, so a bad target
+			// can't leave us half-done.
+			for _, t := range targets {
+				if !strings.HasSuffix(t, ".bak") {
+					return fmt.Errorf("keys forget-backup: refusing to remove %q (not a .bak backup)", t)
+				}
+			}
+			for _, t := range targets {
+				if shred {
+					if err := identity.ShredFile(t); err != nil {
+						return fmt.Errorf("keys forget-backup: %w", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "shredded %s\n", t)
+				} else {
+					if err := os.Remove(t); err != nil {
+						return fmt.Errorf("keys forget-backup: %w", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "removed %s\n", t)
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default ~/.afauth/key.json)")
+	cmd.Flags().BoolVar(&shred, "shred", true, "overwrite the file's bytes before unlinking")
+	cmd.Flags().BoolVar(&all, "all", false, "remove every backup of the active key")
 	return cmd
 }

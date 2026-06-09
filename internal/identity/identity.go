@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"time"
 
 	"github.com/afauthhq/cli/internal/proto"
@@ -123,14 +125,17 @@ func (i *Identity) Save(path string) error {
 //	path                   = new identity
 //	path.<old-unix>.bak    = previous identity
 //
-// If path does not exist, this behaves like Save with no backup.
-func (i *Identity) Replace(path string) error {
+// Returns the path of the backup it created, or "" when path did not
+// exist (in which case this behaves like Save with no backup). Callers
+// surface the backup path so the user knows what to shred with
+// `afauth keys forget-backup` once the rotation is confirmed.
+func (i *Identity) Replace(path string) (string, error) {
 	if len(i.PublicKey) != proto.Ed25519PubKeyLen || len(i.Seed) != ed25519.SeedSize {
-		return errors.New("identity: cannot replace with incomplete identity")
+		return "", errors.New("identity: cannot replace with incomplete identity")
 	}
 	did, err := i.DID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	out := onDiskFormat{
 		Version:    onDiskVersion,
@@ -141,34 +146,35 @@ func (i *Identity) Replace(path string) error {
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
-		return fmt.Errorf("identity: marshal: %w", err)
+		return "", fmt.Errorf("identity: marshal: %w", err)
 	}
 	data = append(data, '\n')
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("identity: create dir: %w", err)
+		return "", fmt.Errorf("identity: create dir: %w", err)
 	}
 
 	newPath := path + ".new"
 	if err := os.WriteFile(newPath, data, 0o600); err != nil {
-		return fmt.Errorf("identity: write %s: %w", newPath, err)
+		return "", fmt.Errorf("identity: write %s: %w", newPath, err)
 	}
 
 	// Archive existing key (if any) under a unix-second suffix so the
 	// caller can recover from a rotation that the service later disputes.
+	var backup string
 	if _, statErr := os.Stat(path); statErr == nil {
-		backup := fmt.Sprintf("%s.%d.bak", path, replaceClock())
+		backup = fmt.Sprintf("%s.%d.bak", path, replaceClock())
 		if err := os.Rename(path, backup); err != nil {
-			return fmt.Errorf("identity: archive old key to %s: %w", backup, err)
+			return "", fmt.Errorf("identity: archive old key to %s: %w", backup, err)
 		}
 	} else if !os.IsNotExist(statErr) {
-		return fmt.Errorf("identity: stat %s: %w", path, statErr)
+		return "", fmt.Errorf("identity: stat %s: %w", path, statErr)
 	}
 
 	if err := os.Rename(newPath, path); err != nil {
-		return fmt.Errorf("identity: install new key at %s: %w", path, err)
+		return "", fmt.Errorf("identity: install new key at %s: %w", path, err)
 	}
-	return nil
+	return backup, nil
 }
 
 // Load reads a keypair from disk. Verifies the persisted public key
@@ -197,6 +203,9 @@ func Load(path string) (*Identity, error) {
 		return nil, fmt.Errorf("identity: public_key_hex: %w", err)
 	}
 	id, err := FromSeed(seed)
+	// FromSeed copied the seed into id; drop our transient decode buffer
+	// so the only live copy is the one the caller can Destroy later.
+	wipe(seed)
 	if err != nil {
 		return nil, err
 	}
@@ -233,4 +242,81 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// wipe zeros b in place. runtime.KeepAlive keeps b reachable past the
+// loop so the compiler cannot treat the writes as a dead store and elide
+// them.
+//
+// Best-effort only: the Go GC may already have copied the backing array
+// during a heap move (leaving an un-zeroed ghost we never reach), and
+// ed25519.NewKeyFromSeed expands the seed into an internal 64-byte key
+// that is not visible here. Zeroizing shrinks the window in which the
+// seed sits in recoverable memory (swap, core dumps); it is not a
+// guarantee that no copy survives.
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+	runtime.KeepAlive(b)
+}
+
+// Destroy zeros the private seed held by this Identity. Call it once the
+// identity is no longer needed (e.g. via defer at the end of a command).
+// After Destroy the Identity can no longer sign. Best-effort — see wipe.
+func (i *Identity) Destroy() {
+	wipe(i.Seed)
+}
+
+// Backups returns the archived key backups that sit alongside keyPath,
+// i.e. files matching "<keyPath>*.bak". This catches both the timestamped
+// backups Replace creates ("<keyPath>.<unix>.bak") and any legacy plain
+// "<keyPath>.bak". The active key itself is never matched (it has no .bak
+// suffix). Results are sorted by filename.
+func Backups(keyPath string) ([]string, error) {
+	matches, err := filepath.Glob(keyPath + "*.bak")
+	if err != nil {
+		return nil, fmt.Errorf("identity: list backups: %w", err)
+	}
+	sort.Strings(matches)
+	return matches, nil
+}
+
+// overwriteInPlace overwrites a file's existing bytes with zeros and
+// fsyncs, without unlinking it.
+//
+// Best-effort: on SSDs and copy-on-write filesystems (APFS, btrfs, ZFS)
+// the write may land on freshly-allocated blocks rather than the original
+// ones, so the old bytes can survive. This raises the bar against casual
+// undelete/forensics but is not a guarantee — full-disk encryption is the
+// real backstop.
+func overwriteInPlace(path string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if n := info.Size(); n > 0 {
+		zeros := make([]byte, n)
+		if _, err := f.WriteAt(zeros, 0); err != nil {
+			return err
+		}
+	}
+	return f.Sync()
+}
+
+// ShredFile overwrites a key backup's bytes with zeros and then unlinks
+// it. See overwriteInPlace for the best-effort caveat.
+func ShredFile(path string) error {
+	if err := overwriteInPlace(path); err != nil {
+		return fmt.Errorf("identity: shred %s: %w", path, err)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("identity: remove %s: %w", path, err)
+	}
+	return nil
 }

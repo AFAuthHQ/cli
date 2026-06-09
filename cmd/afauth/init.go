@@ -34,10 +34,11 @@ mode 0600. Refuses to overwrite an existing key unless --force.`,
 			if err != nil {
 				return err
 			}
+			defer id.Destroy() // zero the new seed once the command returns
 			// --force archives any existing key as a .bak rather than
 			// destroying it; without --force, Save refuses to overwrite.
 			if force {
-				if err := id.Replace(path); err != nil {
+				if _, err := id.Replace(path); err != nil {
 					return err
 				}
 			} else {

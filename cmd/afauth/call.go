@@ -53,6 +53,7 @@ Use --method, --data and --header to control the request shape.
 			if err != nil {
 				return err
 			}
+			defer id.Destroy() // zero the seed once the call (and retries) finish
 			body, err := resolveDataFlag(data)
 			if err != nil {
 				return err

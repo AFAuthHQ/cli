@@ -303,6 +303,116 @@ func TestKeysImportRefusesOverwrite(t *testing.T) {
 	}
 }
 
+// ---------- keys backups / forget-backup ----------
+
+// fabricateBackups copies the active key into the named backup files so
+// the lister/shredder have real, loadable key blobs to work on. Returns
+// the active key path.
+func fabricateBackups(t *testing.T, home string, names ...string) string {
+	t.Helper()
+	keyPath := filepath.Join(home, "key.json")
+	keyBytes, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read active key: %v", err)
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(home, n), keyBytes, 0o600); err != nil {
+			t.Fatalf("write backup %s: %v", n, err)
+		}
+	}
+	return keyPath
+}
+
+func TestKeysBackupsListsTimestampedAndLegacy(t *testing.T) {
+	home := withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// One timestamped backup (what rotate produces) and one legacy plain
+	// .bak (the orphan shape that motivated this work).
+	fabricateBackups(t, home, "key.json.1700000000.bak", "key.json.bak")
+
+	stdout, _, err := runCLI(t, "keys", "backups")
+	if err != nil {
+		t.Fatalf("keys backups: %v", err)
+	}
+	for _, want := range []string{"key.json.1700000000.bak", "key.json.bak", "did:key:"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("keys backups missing %q\nfull:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestKeysForgetBackupShredsOnlyTarget(t *testing.T) {
+	home := withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	fabricateBackups(t, home, "key.json.1700000000.bak", "key.json.bak")
+	legacy := filepath.Join(home, "key.json.bak")
+	timestamped := filepath.Join(home, "key.json.1700000000.bak")
+
+	stdout, _, err := runCLI(t, "keys", "forget-backup", legacy)
+	if err != nil {
+		t.Fatalf("forget-backup: %v", err)
+	}
+	if !strings.Contains(stdout, "shredded") {
+		t.Fatalf("expected 'shredded' in output, got %q", stdout)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("target backup still present after shred (err=%v)", err)
+	}
+	if _, err := os.Stat(timestamped); err != nil {
+		t.Fatalf("untargeted backup should survive: %v", err)
+	}
+}
+
+func TestKeysForgetBackupRefusesActiveKey(t *testing.T) {
+	home := withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	keyPath := filepath.Join(home, "key.json")
+	if _, _, err := runCLI(t, "keys", "forget-backup", keyPath); err == nil {
+		t.Fatal("forget-backup must refuse a non-.bak path (the active key)")
+	}
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("active key must survive a refused forget-backup: %v", err)
+	}
+}
+
+func TestKeysForgetBackupAllRemovesEvery(t *testing.T) {
+	home := withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	keyPath := fabricateBackups(t, home, "key.json.1.bak", "key.json.2.bak", "key.json.bak")
+
+	if _, _, err := runCLI(t, "keys", "forget-backup", "--all"); err != nil {
+		t.Fatalf("forget-backup --all: %v", err)
+	}
+	left, err := identity.Backups(keyPath)
+	if err != nil {
+		t.Fatalf("Backups: %v", err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("backups remain after --all: %v", left)
+	}
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("active key must survive --all: %v", err)
+	}
+}
+
+func TestKeysForgetBackupRequiresTarget(t *testing.T) {
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, _, err := runCLI(t, "keys", "forget-backup"); err == nil {
+		t.Fatal("forget-backup with no path and no --all must error")
+	}
+}
+
 // ---------- discover ----------
 
 func TestDiscoverHumanReadable(t *testing.T) {
@@ -909,8 +1019,12 @@ func TestKeysRotateSwapsActiveKey(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"state": "UNCLAIMED"})
 	})
 
-	if _, _, err := runCLI(t, "keys", "rotate", "--service", srv.URL()); err != nil {
+	stdout, _, err := runCLI(t, "keys", "rotate", "--service", srv.URL())
+	if err != nil {
 		t.Fatalf("keys rotate: %v", err)
+	}
+	if !strings.Contains(stdout, "afauth keys forget-backup") {
+		t.Fatalf("rotate should tell the user to shred the backup once confirmed:\n%s", stdout)
 	}
 	newDID := whoamiDID(t)
 	if newDID == oldDID {

@@ -25,6 +25,7 @@ func newWhoamiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer id.Destroy()
 			did, err := id.DID()
 			if err != nil {
 				return err

@@ -216,9 +216,10 @@ func TestKeysExportToStdout(t *testing.T) {
 	if _, _, err := runCLI(t, "init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	stdout, _, err := runCLI(t, "keys", "export")
+	// Printing the raw seed to the terminal is now an explicit opt-in.
+	stdout, stderr, err := runCLI(t, "keys", "export", "--stdout")
 	if err != nil {
-		t.Fatalf("keys export: %v", err)
+		t.Fatalf("keys export --stdout: %v", err)
 	}
 	var d struct {
 		Version    int    `json:"version"`
@@ -232,6 +233,24 @@ func TestKeysExportToStdout(t *testing.T) {
 	if d.Version != 1 || d.Algorithm != "ed25519" || d.PrivateKey == "" {
 		t.Fatalf("export shape: %+v", d)
 	}
+	if !strings.Contains(stderr, "RAW private key") {
+		t.Fatalf("expected a stderr warning when piping the seed, got: %q", stderr)
+	}
+}
+
+func TestKeysExportRefusesTerminalByDefault(t *testing.T) {
+	withTempHome(t)
+	if _, _, err := runCLI(t, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Zero-arg export must error rather than dump the seed to scrollback.
+	stdout, _, err := runCLI(t, "keys", "export")
+	if err == nil {
+		t.Fatal("keys export with no destination must error, not print the seed")
+	}
+	if strings.Contains(stdout, "private_key_seed_hex") {
+		t.Fatalf("seed leaked to stdout on the refused default path: %q", stdout)
+	}
 }
 
 func TestKeysExportToFile(t *testing.T) {
@@ -240,12 +259,19 @@ func TestKeysExportToFile(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	out := filepath.Join(home, "exported.json")
-	stdout, _, err := runCLI(t, "keys", "export", "--out", out)
+	stdout, stderr, err := runCLI(t, "keys", "export", "--out", out)
 	if err != nil {
 		t.Fatalf("keys export --out: %v", err)
 	}
 	if !strings.Contains(stdout, out) {
 		t.Fatalf("stdout missing destination path: %q", stdout)
+	}
+	// The seed must land in the file, never on stdout.
+	if strings.Contains(stdout, "private_key_seed_hex") {
+		t.Fatalf("seed leaked onto stdout on the --out path: %q", stdout)
+	}
+	if !strings.Contains(stderr, "RAW private key") {
+		t.Fatalf("expected a stderr warning on --out, got: %q", stderr)
 	}
 	if _, err := identity.Load(out); err != nil {
 		t.Fatalf("exported file not loadable as identity: %v", err)

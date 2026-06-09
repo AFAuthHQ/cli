@@ -136,16 +136,30 @@ does not specify here.
 
 func newKeysExportCmd() *cobra.Command {
 	var (
-		keyPath string
-		outPath string
+		keyPath  string
+		outPath  string
+		toStdout bool
 	)
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export the active key (stdout by default, or to --out)",
-		Long: `Writes the active key file verbatim to stdout. With --out, writes
-to that path with mode 0600 instead. The exported file contains the
-RAW Ed25519 seed — keep it secret.`,
+		Short: "Export the active key to a 0600 file (or --stdout)",
+		Long: `Copies the active key to a file with mode 0600 (--out PATH). The file
+contains the RAW Ed25519 seed — anyone who reads it can act as this
+agent, so keep it secret.
+
+export will NOT write the seed to the terminal by default, where it
+would leak into scrollback, tmux/screen capture, and CI logs. Pass
+--stdout to print the raw key anyway (e.g. to pipe into an encryptor):
+
+  afauth keys export --out ./backup.json
+  afauth keys export --stdout | gpg -e -r you@example.com > key.json.gpg`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if outPath != "" && toStdout {
+				return fmt.Errorf("keys export: pass only one of --out or --stdout")
+			}
+			if outPath == "" && !toStdout {
+				return fmt.Errorf("keys export: refusing to write your private key to the terminal by default\n  use --out <file> to save it (mode 0600), or --stdout to print the raw seed anyway")
+			}
 			path := keyPath
 			if path == "" {
 				p, err := identity.DefaultPath()
@@ -162,9 +176,13 @@ RAW Ed25519 seed — keep it secret.`,
 				if err := os.WriteFile(outPath, data, 0o600); err != nil {
 					return fmt.Errorf("keys export: %w", err)
 				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s holds your RAW private key (mode 0600) — keep it secret\n", outPath)
 				fmt.Fprintf(cmd.OutOrStdout(), "exported %s -> %s\n", path, outPath)
 				return nil
 			}
+			// --stdout: explicit opt-in. Warn on stderr (not stdout, so a
+			// pipe stays clean) before emitting the raw seed.
+			fmt.Fprintln(cmd.ErrOrStderr(), "warning: writing your RAW private key to stdout — it will be in your terminal scrollback")
 			if _, err := cmd.OutOrStdout().Write(data); err != nil {
 				return err
 			}
@@ -175,7 +193,8 @@ RAW Ed25519 seed — keep it secret.`,
 		},
 	}
 	cmd.Flags().StringVar(&keyPath, "key", "", "key path (default ~/.afauth/key.json)")
-	cmd.Flags().StringVar(&outPath, "out", "", "output file path (default stdout)")
+	cmd.Flags().StringVar(&outPath, "out", "", "write the key to this file (mode 0600)")
+	cmd.Flags().BoolVar(&toStdout, "stdout", false, "print the raw key to stdout (leaks into scrollback/CI logs)")
 	return cmd
 }
 
